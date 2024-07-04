@@ -552,13 +552,32 @@ class LLM:
         outputs: List[Union[RequestOutput, EmbeddingRequestOutput]] = []
         total_in_toks = 0
         total_out_toks = 0
+        # import pdb; pdb.set_trace()
         while self.llm_engine.has_unfinished_requests():
-            step_outputs = self.llm_engine.step()
+            step_outputs, step_outputs_2 = self.llm_engine.step()
             for output in step_outputs:
                 if output.finished:
                     outputs.append(output)
                     if use_tqdm:
                         if isinstance(output, RequestOutput):
+                            # import pdb; pdb.set_trace()
+                            # Calculate tokens only for RequestOutput
+                            total_in_toks += len(output.prompt_token_ids)
+                            in_spd = total_in_toks / pbar.format_dict["elapsed"]
+                            total_out_toks += sum(
+                                len(stp.token_ids) for stp in output.outputs)
+                            out_spd = total_out_toks / pbar.format_dict[
+                                "elapsed"]
+                            pbar.postfix = (
+                                f"est. speed input: {in_spd:.2f} toks/s, "
+                                f"output: {out_spd:.2f} toks/s")
+                        pbar.update(1)
+            for output in step_outputs_2:
+                if output.finished:
+                    outputs.append(output)
+                    if use_tqdm:
+                        if isinstance(output, RequestOutput):
+                            # import pdb; pdb.set_trace()
                             # Calculate tokens only for RequestOutput
                             total_in_toks += len(output.prompt_token_ids)
                             in_spd = total_in_toks / pbar.format_dict["elapsed"]
