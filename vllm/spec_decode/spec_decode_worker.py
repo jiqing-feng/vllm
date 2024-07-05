@@ -386,13 +386,9 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                                                    num_lookahead_slots)
 
     @torch.inference_mode()
-    def execute_model_hete_spec_decode(self, llm_engine):
+    async def execute_model_hete_spec_decode(self, llm_engine):
         # Run the engine.
         num_requests = llm_engine.get_num_unfinished_requests()
-
-        cuda_stream_1 = torch.cuda.Stream()
-        cuda_stream_2 = torch.cuda.Stream()
-
         pbar = tqdm(
             total=num_requests,
             desc="Processed prompts",
@@ -406,7 +402,8 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
 
         request_outputs = []
         request_outputs_2 = []
-        # import pdb; pdb.set_trace()
+        execute_model_req = None
+        execute_model_req_2 = None
         while llm_engine.has_unfinished_requests():
             seq_group_metadata_list, scheduler_outputs = llm_engine.scheduler[0].schedule()
             finished_requests_ids = llm_engine.scheduler[0].get_and_reset_finished_requests_ids()
@@ -426,8 +423,6 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             if execute_model_req:
                 run_spec = self.get_if_run_no_spec(execute_model_req)
                 if run_spec != "run_spec":
-                    cuda_stream_1.synchronize()
-                    cuda_stream_2.synchronize()
                     total_in_toks, total_out_toks = self.update_pbar(request_outputs, total_in_toks, total_out_toks, outputs, pbar)
                     total_in_toks, total_out_toks = self.update_pbar(request_outputs_2, total_in_toks, total_out_toks, outputs, pbar)
                     output = self._run_no_spec(execute_model_req, skip_proposer=run_spec)
@@ -447,7 +442,25 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             if execute_model_req and run_spec == "run_spec":
                 proposals_1 = self.proposer_worker.get_spec_proposals(execute_model_req)
 
-            cuda_stream_2.synchronize()
+            if execute_model_req_2 and run_spec_2 == "run_spec":
+                proposal_scores_2 = await proposal_scores_2
+                accepted_token_ids_2, target_logprobs_2 = self._verify_tokens(
+                    execute_model_req_2.seq_group_metadata_list, proposal_scores_2,
+                    proposals_2, execute_model_req_2.num_lookahead_slots, 2)
+
+                output_2 = self._create_output_sampler_list(
+                    execute_model_req_2.seq_group_metadata_list,
+                    accepted_token_ids_2,
+                    target_logprobs=target_logprobs_2,
+                    k=execute_model_req_2.num_lookahead_slots)
+
+                request_outputs_2 = llm_engine._process_model_outputs(
+                    output_2, scheduler_outputs_2.scheduled_seq_groups,
+                    scheduler_outputs_2.ignored_seq_groups, seq_group_metadata_list_2)
+
+                llm_engine.do_log_stats(scheduler_outputs_2, output_2)
+                llm_engine.do_tracing(scheduler_outputs_2)
+
             total_in_toks, total_out_toks = self.update_pbar(request_outputs_2, total_in_toks, total_out_toks, outputs, pbar)
             seq_group_metadata_list_2, scheduler_outputs_2 = llm_engine.scheduler[1].schedule()
             finished_requests_ids_2 = llm_engine.scheduler[1].get_and_reset_finished_requests_ids()
@@ -465,8 +478,6 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             if execute_model_req_2:
                 run_spec_2 = self.get_if_run_no_spec(execute_model_req_2)
                 if run_spec_2 != "run_spec":
-                    cuda_stream_1.synchronize()
-                    cuda_stream_2.synchronize()
                     total_in_toks, total_out_toks = self.update_pbar(request_outputs, total_in_toks, total_out_toks, outputs, pbar)
                     total_in_toks, total_out_toks = self.update_pbar(request_outputs_2, total_in_toks, total_out_toks, outputs, pbar)
                     output_2 = self._run_no_spec(execute_model_req_2, skip_proposer=run_spec_2)
@@ -481,57 +492,43 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                 execute_model_req_2.previous_hidden_states = self.previous_hidden_states_2
                 self.previous_hidden_states_2 = None
 
-            with torch.cuda.stream(cuda_stream_1):
-                if execute_model_req and run_spec == "run_spec":
-                    proposal_scores_1 = self.scorer.score_proposals(
-                        execute_model_req,
-                        proposals_1,
-                    )
-                    accepted_token_ids_1, target_logprobs_1 = self._verify_tokens(
-                        execute_model_req.seq_group_metadata_list, proposal_scores_1,
-                        proposals_1, execute_model_req.num_lookahead_slots)
-
-                    output = self._create_output_sampler_list(
-                        execute_model_req.seq_group_metadata_list,
-                        accepted_token_ids_1,
-                        target_logprobs=target_logprobs_1,
-                        k=execute_model_req.num_lookahead_slots)
-
-                    request_outputs = llm_engine._process_model_outputs(
-                        output, scheduler_outputs.scheduled_seq_groups,
-                        scheduler_outputs.ignored_seq_groups, seq_group_metadata_list)
-
-                    llm_engine.do_log_stats(scheduler_outputs, output)
-                    llm_engine.do_tracing(scheduler_outputs)
+            if execute_model_req and run_spec == "run_spec":
+                proposal_scores_1 = self.scorer.score_proposals(
+                    execute_model_req,
+                    proposals_1,
+                )
 
             if execute_model_req_2 and run_spec_2 == "run_spec":
                 proposals_2 = self.proposer_worker.get_spec_proposals(execute_model_req_2)
 
-            cuda_stream_1.synchronize()
+            if execute_model_req and run_spec == "run_spec":
+                proposal_scores_1 = await proposal_scores_1
+                accepted_token_ids_1, target_logprobs_1 = self._verify_tokens(
+                    execute_model_req.seq_group_metadata_list, proposal_scores_1,
+                    proposals_1, execute_model_req.num_lookahead_slots)
+
+                output = self._create_output_sampler_list(
+                    execute_model_req.seq_group_metadata_list,
+                    accepted_token_ids_1,
+                    target_logprobs=target_logprobs_1,
+                    k=execute_model_req.num_lookahead_slots)
+
+                request_outputs = llm_engine._process_model_outputs(
+                    output, scheduler_outputs.scheduled_seq_groups,
+                    scheduler_outputs.ignored_seq_groups, seq_group_metadata_list)
+
+                llm_engine.do_log_stats(scheduler_outputs, output)
+                llm_engine.do_tracing(scheduler_outputs)
+
             total_in_toks, total_out_toks = self.update_pbar(request_outputs, total_in_toks, total_out_toks, outputs, pbar)
-            with torch.cuda.stream(cuda_stream_2):
-                if execute_model_req_2 and run_spec_2 == "run_spec":
-                    proposal_scores_2 = self.scorer.score_proposals(
-                        execute_model_req_2,
-                        proposals_2,
-                    )
-                    accepted_token_ids_2, target_logprobs_2 = self._verify_tokens(
-                        execute_model_req_2.seq_group_metadata_list, proposal_scores_2,
-                        proposals_2, execute_model_req_2.num_lookahead_slots, 2)
+            if execute_model_req_2 and run_spec_2 == "run_spec":
+                proposal_scores_2 = self.scorer.score_proposals(
+                    execute_model_req_2,
+                    proposals_2,
+                )
 
-                    output_2 = self._create_output_sampler_list(
-                        execute_model_req_2.seq_group_metadata_list,
-                        accepted_token_ids_2,
-                        target_logprobs=target_logprobs_2,
-                        k=execute_model_req_2.num_lookahead_slots)
-
-                    request_outputs_2 = llm_engine._process_model_outputs(
-                        output_2, scheduler_outputs_2.scheduled_seq_groups,
-                        scheduler_outputs_2.ignored_seq_groups, seq_group_metadata_list_2)
-
-                    llm_engine.do_log_stats(scheduler_outputs_2, output_2)
-                    llm_engine.do_tracing(scheduler_outputs_2)
-
+        total_in_toks, total_out_toks = self.update_pbar(request_outputs, total_in_toks, total_out_toks, outputs, pbar)
+        total_in_toks, total_out_toks = self.update_pbar(request_outputs_2, total_in_toks, total_out_toks, outputs, pbar)
         pbar.close()
 
         return outputs

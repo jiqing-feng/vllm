@@ -38,7 +38,7 @@ class BatchExpansionTop1Scorer(SpeculativeScorer):
         self._vocab_size = vocab_size
 
     @nvtx_range("BatchExpansionTop1Scorer.score_proposals")
-    def score_proposals(
+    async def score_proposals(
         self,
         execute_model_req: ExecuteModelRequest,
         proposals: SpeculativeProposals,
