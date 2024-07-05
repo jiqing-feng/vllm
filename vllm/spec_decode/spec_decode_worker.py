@@ -559,7 +559,8 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             return "run_spec"
 
     def update_pbar(self, request_outputs, total_in_toks, total_out_toks, outputs, pbar):
-        for output in request_outputs:
+        while request_outputs:
+            output = request_outputs.pop(0)
             if output.finished:
                 outputs.append(output)
                 if isinstance(output, RequestOutput):

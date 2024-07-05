@@ -592,8 +592,8 @@ class LLM:
                                     f"est. speed input: {in_spd:.2f} toks/s, "
                                     f"output: {out_spd:.2f} toks/s")
                             pbar.update(1)
-        if use_tqdm:
-            pbar.close()
+            if use_tqdm:
+                pbar.close()
         # Sort the outputs by request ID.
         # This is necessary because some requests may be finished earlier than
         # its previous requests.
