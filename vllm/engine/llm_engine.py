@@ -918,6 +918,10 @@ class LLMEngine:
 
         return request_outputs, request_outputs_2
 
+    def run_hete_spec_decode(self):
+        output = self.model_executor.execute_model_hete_spec_decode(self)
+        return output
+
     def add_logger(self, logger_name: str, logger: StatLoggerBase) -> None:
         if logger_name in self.stat_loggers:
             raise KeyError(f"Logger with name {logger_name} already exists.")

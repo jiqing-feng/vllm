@@ -3,7 +3,9 @@ from functools import cached_property
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
+from tqdm import tqdm
 
+from vllm.outputs import EmbeddingRequestOutput, RequestOutput
 from vllm.config import ParallelConfig, SpeculativeConfig
 from vllm.distributed.communication_op import broadcast_tensor_dict
 from vllm.logger import init_logger
@@ -224,6 +226,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         # Hidden states from target model to pass to proposer
         # in the subsequent step.
         self.previous_hidden_states: Optional[HiddenStates] = None
+        self.previous_hidden_states_2: Optional[HiddenStates] = None
 
     def init_device(self) -> None:
         """Initialize both scorer and proposer models.
@@ -383,6 +386,197 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                                                    num_lookahead_slots)
 
     @torch.inference_mode()
+    def execute_model_hete_spec_decode(self, llm_engine):
+        # Run the engine.
+        num_requests = llm_engine.get_num_unfinished_requests()
+
+        cuda_stream_1 = torch.cuda.Stream()
+        cuda_stream_2 = torch.cuda.Stream()
+
+        pbar = tqdm(
+            total=num_requests,
+            desc="Processed prompts",
+            dynamic_ncols=True,
+            postfix=(f"est. speed input: {0:.2f} toks/s, "
+                        f"output: {0:.2f} toks/s"),
+        )
+        outputs: List[Union[RequestOutput, EmbeddingRequestOutput]] = []
+        total_in_toks = 0
+        total_out_toks = 0
+
+        request_outputs = []
+        request_outputs_2 = []
+        # import pdb; pdb.set_trace()
+        while llm_engine.has_unfinished_requests():
+            seq_group_metadata_list, scheduler_outputs = llm_engine.scheduler[0].schedule()
+            finished_requests_ids = llm_engine.scheduler[0].get_and_reset_finished_requests_ids()
+
+            execute_model_req = None
+            run_spec = None
+            if not scheduler_outputs.is_empty():
+                execute_model_req = ExecuteModelRequest(
+                    seq_group_metadata_list=seq_group_metadata_list,
+                    blocks_to_swap_in=scheduler_outputs.blocks_to_swap_in,
+                    blocks_to_swap_out=scheduler_outputs.blocks_to_swap_out,
+                    blocks_to_copy=scheduler_outputs.blocks_to_copy,
+                    num_lookahead_slots=scheduler_outputs.num_lookahead_slots,
+                    running_queue_size=scheduler_outputs.running_queue_size,
+                    finished_requests_ids=finished_requests_ids)
+
+            if execute_model_req:
+                run_spec = self.get_if_run_no_spec(execute_model_req)
+                if run_spec != "run_spec":
+                    cuda_stream_1.synchronize()
+                    cuda_stream_2.synchronize()
+                    total_in_toks, total_out_toks = self.update_pbar(request_outputs, total_in_toks, total_out_toks, outputs, pbar)
+                    total_in_toks, total_out_toks = self.update_pbar(request_outputs_2, total_in_toks, total_out_toks, outputs, pbar)
+                    output = self._run_no_spec(execute_model_req, skip_proposer=run_spec)
+                    request_outputs = llm_engine._process_model_outputs(
+                        output, scheduler_outputs.scheduled_seq_groups,
+                        scheduler_outputs.ignored_seq_groups, seq_group_metadata_list)
+
+                    llm_engine.do_log_stats(scheduler_outputs, output)
+                    llm_engine.do_tracing(scheduler_outputs)
+
+            if execute_model_req and run_spec == "run_spec":
+                # Pass last hidden states from target model to proposer
+                execute_model_req.previous_hidden_states = self.previous_hidden_states
+                self.previous_hidden_states = None
+
+            # Generate proposals using draft worker.
+            if execute_model_req and run_spec == "run_spec":
+                proposals_1 = self.proposer_worker.get_spec_proposals(execute_model_req)
+
+            cuda_stream_2.synchronize()
+            total_in_toks, total_out_toks = self.update_pbar(request_outputs_2, total_in_toks, total_out_toks, outputs, pbar)
+            seq_group_metadata_list_2, scheduler_outputs_2 = llm_engine.scheduler[1].schedule()
+            finished_requests_ids_2 = llm_engine.scheduler[1].get_and_reset_finished_requests_ids()
+            execute_model_req_2 = None
+            run_spec_2 = None
+            if not scheduler_outputs_2.is_empty():
+                execute_model_req_2 = ExecuteModelRequest(
+                    seq_group_metadata_list=seq_group_metadata_list_2,
+                    blocks_to_swap_in=scheduler_outputs_2.blocks_to_swap_in,
+                    blocks_to_swap_out=scheduler_outputs_2.blocks_to_swap_out,
+                    blocks_to_copy=scheduler_outputs_2.blocks_to_copy,
+                    num_lookahead_slots=scheduler_outputs_2.num_lookahead_slots,
+                    running_queue_size=scheduler_outputs_2.running_queue_size,
+                    finished_requests_ids=finished_requests_ids_2)
+            if execute_model_req_2:
+                run_spec_2 = self.get_if_run_no_spec(execute_model_req_2)
+                if run_spec_2 != "run_spec":
+                    cuda_stream_1.synchronize()
+                    cuda_stream_2.synchronize()
+                    total_in_toks, total_out_toks = self.update_pbar(request_outputs, total_in_toks, total_out_toks, outputs, pbar)
+                    total_in_toks, total_out_toks = self.update_pbar(request_outputs_2, total_in_toks, total_out_toks, outputs, pbar)
+                    output_2 = self._run_no_spec(execute_model_req_2, skip_proposer=run_spec_2)
+                    request_outputs_2 = llm_engine._process_model_outputs(
+                        output_2, scheduler_outputs_2.scheduled_seq_groups,
+                        scheduler_outputs_2.ignored_seq_groups, seq_group_metadata_list_2)
+
+                    llm_engine.do_log_stats(scheduler_outputs_2, output_2)
+                    llm_engine.do_tracing(scheduler_outputs_2)
+            if execute_model_req_2 and run_spec_2 == "run_spec":
+                # Pass last hidden states from target model to proposer
+                execute_model_req_2.previous_hidden_states = self.previous_hidden_states_2
+                self.previous_hidden_states_2 = None
+
+            with torch.cuda.stream(cuda_stream_1):
+                if execute_model_req and run_spec == "run_spec":
+                    proposal_scores_1 = self.scorer.score_proposals(
+                        execute_model_req,
+                        proposals_1,
+                    )
+                    accepted_token_ids_1, target_logprobs_1 = self._verify_tokens(
+                        execute_model_req.seq_group_metadata_list, proposal_scores_1,
+                        proposals_1, execute_model_req.num_lookahead_slots)
+
+                    output = self._create_output_sampler_list(
+                        execute_model_req.seq_group_metadata_list,
+                        accepted_token_ids_1,
+                        target_logprobs=target_logprobs_1,
+                        k=execute_model_req.num_lookahead_slots)
+
+                    request_outputs = llm_engine._process_model_outputs(
+                        output, scheduler_outputs.scheduled_seq_groups,
+                        scheduler_outputs.ignored_seq_groups, seq_group_metadata_list)
+
+                    llm_engine.do_log_stats(scheduler_outputs, output)
+                    llm_engine.do_tracing(scheduler_outputs)
+
+            if execute_model_req_2 and run_spec_2 == "run_spec":
+                proposals_2 = self.proposer_worker.get_spec_proposals(execute_model_req_2)
+
+            cuda_stream_1.synchronize()
+            total_in_toks, total_out_toks = self.update_pbar(request_outputs, total_in_toks, total_out_toks, outputs, pbar)
+            with torch.cuda.stream(cuda_stream_2):
+                if execute_model_req_2 and run_spec_2 == "run_spec":
+                    proposal_scores_2 = self.scorer.score_proposals(
+                        execute_model_req_2,
+                        proposals_2,
+                    )
+                    accepted_token_ids_2, target_logprobs_2 = self._verify_tokens(
+                        execute_model_req_2.seq_group_metadata_list, proposal_scores_2,
+                        proposals_2, execute_model_req_2.num_lookahead_slots, 2)
+
+                    output_2 = self._create_output_sampler_list(
+                        execute_model_req_2.seq_group_metadata_list,
+                        accepted_token_ids_2,
+                        target_logprobs=target_logprobs_2,
+                        k=execute_model_req_2.num_lookahead_slots)
+
+                    request_outputs_2 = llm_engine._process_model_outputs(
+                        output_2, scheduler_outputs_2.scheduled_seq_groups,
+                        scheduler_outputs_2.ignored_seq_groups, seq_group_metadata_list_2)
+
+                    llm_engine.do_log_stats(scheduler_outputs_2, output_2)
+                    llm_engine.do_tracing(scheduler_outputs_2)
+
+        pbar.close()
+
+        return outputs
+
+
+    def get_if_run_no_spec(self, execute_model_req):
+        disable_all_speculation = self._should_disable_all_speculation(
+            execute_model_req)
+        num_lookahead_slots = execute_model_req.num_lookahead_slots
+        broadcast_dict = dict(
+            num_lookahead_slots=num_lookahead_slots,
+            disable_all_speculation=disable_all_speculation,
+        )
+        broadcast_tensor_dict(broadcast_dict, src=self._driver_rank)
+
+        assert execute_model_req.seq_group_metadata_list is not None, (
+            "speculative decoding requires non-None seq_group_metadata_list")
+
+        self._maybe_disable_speculative_tokens(
+            disable_all_speculation, execute_model_req.seq_group_metadata_list)
+
+        if num_lookahead_slots == 0 or len(execute_model_req.seq_group_metadata_list) == 0 or disable_all_speculation:
+            return disable_all_speculation
+        else:
+            return "run_spec"
+
+    def update_pbar(self, request_outputs, total_in_toks, total_out_toks, outputs, pbar):
+        for output in request_outputs:
+            if output.finished:
+                outputs.append(output)
+                if isinstance(output, RequestOutput):
+                    # Calculate tokens only for RequestOutput
+                    total_in_toks += len(output.prompt_token_ids)
+                    in_spd = total_in_toks / pbar.format_dict["elapsed"]
+                    total_out_toks += sum(
+                        len(stp.token_ids) for stp in output.outputs)
+                    out_spd = total_out_toks / pbar.format_dict[
+                        "elapsed"]
+                    pbar.postfix = (
+                        f"est. speed input: {in_spd:.2f} toks/s, "
+                        f"output: {out_spd:.2f} toks/s")
+                pbar.update(1)
+        return total_in_toks, total_out_toks
+
+    @torch.inference_mode()
     def start_worker_execution_loop(self) -> None:
         """Execute model loop to perform speculative decoding
         in parallel worker."""
@@ -513,6 +707,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         proposal_scores: SpeculativeScores,
         proposals: SpeculativeProposals,
         max_proposal_len: int,
+        req_id: int = 1,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Determine which speculative tokens are accepted using the
         probabilities of each token according to the proposer and scorer models.
@@ -581,8 +776,12 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             index = accepted_index[:, None, None].expand(-1, 1, hs_size)
             hidden_states = hidden_states.gather(1, index).squeeze(1)  # b x d
             # Store hidden states from target model for subsequent decode step
-            self.previous_hidden_states = HiddenStates(seq_group_metadata_list,
-                                                       hidden_states)
+            if req_id == 2:
+                self.previous_hidden_states_2 = HiddenStates(seq_group_metadata_list,
+                                                        hidden_states)
+            else:
+                self.previous_hidden_states = HiddenStates(seq_group_metadata_list,
+                                                        hidden_states)
 
         return accepted_token_ids, logprobs
 
