@@ -35,6 +35,8 @@ from vllm.spec_decode.util import (create_sequence_group_output,
 from vllm.worker.worker import Worker
 from vllm.worker.worker_base import LoraNotSupportedWorkerBase, WorkerBase
 
+from threading import Thread
+
 logger = init_logger(__name__)
 
 
@@ -386,7 +388,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                                                    num_lookahead_slots)
 
     @torch.inference_mode()
-    async def execute_model_hete_spec_decode(self, llm_engine):
+    def execute_model_hete_spec_decode(self, llm_engine):
         # Run the engine.
         num_requests = llm_engine.get_num_unfinished_requests()
         pbar = tqdm(
@@ -404,6 +406,9 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         request_outputs_2 = []
         execute_model_req = None
         execute_model_req_2 = None
+        sub_thread = Thread()
+        sub_thread.start()
+        sub_thread.join()
         while llm_engine.has_unfinished_requests():
             seq_group_metadata_list, scheduler_outputs = llm_engine.scheduler[0].schedule()
             finished_requests_ids = llm_engine.scheduler[0].get_and_reset_finished_requests_ids()
@@ -441,11 +446,12 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             # Generate proposals using draft worker.
             if execute_model_req and run_spec == "run_spec":
                 proposals_1 = self.proposer_worker.get_spec_proposals(execute_model_req)
+            sub_thread.join()
 
             if execute_model_req_2 and run_spec_2 == "run_spec":
-                proposal_scores_2 = await proposal_scores_2
+                self.scorer.proposal_scores_2 = self.scorer.proposal_scores_2
                 accepted_token_ids_2, target_logprobs_2 = self._verify_tokens(
-                    execute_model_req_2.seq_group_metadata_list, proposal_scores_2,
+                    execute_model_req_2.seq_group_metadata_list, self.scorer.proposal_scores_2,
                     proposals_2, execute_model_req_2.num_lookahead_slots, 2)
 
                 output_2 = self._create_output_sampler_list(
@@ -493,18 +499,18 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                 self.previous_hidden_states_2 = None
 
             if execute_model_req and run_spec == "run_spec":
-                proposal_scores_1 = self.scorer.score_proposals(
-                    execute_model_req,
-                    proposals_1,
-                )
+                sub_thread = Thread(target=self.scorer.score_proposals, args=(execute_model_req, proposals_1, 1))
+                sub_thread.start()
+                # self.scorer.score_proposals(execute_model_req, proposals_1, 1)
 
             if execute_model_req_2 and run_spec_2 == "run_spec":
                 proposals_2 = self.proposer_worker.get_spec_proposals(execute_model_req_2)
+            sub_thread.join()
 
             if execute_model_req and run_spec == "run_spec":
-                proposal_scores_1 = await proposal_scores_1
+                self.scorer.proposal_scores_1 = self.scorer.proposal_scores_1
                 accepted_token_ids_1, target_logprobs_1 = self._verify_tokens(
-                    execute_model_req.seq_group_metadata_list, proposal_scores_1,
+                    execute_model_req.seq_group_metadata_list, self.scorer.proposal_scores_1,
                     proposals_1, execute_model_req.num_lookahead_slots)
 
                 output = self._create_output_sampler_list(
@@ -522,10 +528,9 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
 
             total_in_toks, total_out_toks = self.update_pbar(request_outputs, total_in_toks, total_out_toks, outputs, pbar)
             if execute_model_req_2 and run_spec_2 == "run_spec":
-                proposal_scores_2 = self.scorer.score_proposals(
-                    execute_model_req_2,
-                    proposals_2,
-                )
+                sub_thread = Thread(target=self.scorer.score_proposals, args=(execute_model_req_2, proposals_2, 2))
+                sub_thread.start()
+                # self.scorer.score_proposals(execute_model_req_2, proposals_2, 2)
 
         total_in_toks, total_out_toks = self.update_pbar(request_outputs, total_in_toks, total_out_toks, outputs, pbar)
         total_in_toks, total_out_toks = self.update_pbar(request_outputs_2, total_in_toks, total_out_toks, outputs, pbar)

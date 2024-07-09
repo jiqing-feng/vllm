@@ -8,7 +8,6 @@ from vllm.utils import (get_distributed_init_method, get_ip, get_open_port,
                         make_async)
 from vllm.worker.worker_base import WorkerWrapperBase
 
-import asyncio
 
 logger = init_logger(__name__)
 
@@ -127,7 +126,7 @@ class GPUExecutor(ExecutorBase):
         return
 
     def execute_model_hete_spec_decode(self, llm_engine):
-        output = asyncio.run(self.driver_worker.execute_model_hete_spec_decode(llm_engine))
+        output = self.driver_worker.execute_model_hete_spec_decode(llm_engine)
         return output
 
 

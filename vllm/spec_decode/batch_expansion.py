@@ -36,12 +36,15 @@ class BatchExpansionTop1Scorer(SpeculativeScorer):
         self._scorer_worker = scorer_worker
         self._device = device
         self._vocab_size = vocab_size
+        self.proposal_scores_1 = None
+        self.proposal_scores_2 = None
 
     @nvtx_range("BatchExpansionTop1Scorer.score_proposals")
-    async def score_proposals(
+    def score_proposals(
         self,
         execute_model_req: ExecuteModelRequest,
         proposals: SpeculativeProposals,
+        index: int,
     ) -> SpeculativeScores:
         """Score the proposed tokens via the scorer model.
 
@@ -93,12 +96,28 @@ class BatchExpansionTop1Scorer(SpeculativeScorer):
             k=execute_model_req.num_lookahead_slots,
         )
 
-        return SpeculativeScores(
-            probs=all_probs,
-            token_ids=all_tokens,
-            logprobs=spec_logprobs,
-            hidden_states=target_sampler_output.hidden_states,
-        )
+        if index == 2:
+            self.proposal_scores_2 = SpeculativeScores(
+                    probs=all_probs,
+                    token_ids=all_tokens,
+                    logprobs=spec_logprobs,
+                    hidden_states=target_sampler_output.hidden_states,
+                )
+        else:
+            self.proposal_scores_1 = SpeculativeScores(
+                    probs=all_probs,
+                    token_ids=all_tokens,
+                    logprobs=spec_logprobs,
+                    hidden_states=target_sampler_output.hidden_states,
+                )
+
+
+        # return SpeculativeScores(
+        #     probs=all_probs,
+        #     token_ids=all_tokens,
+        #     logprobs=spec_logprobs,
+        #     hidden_states=target_sampler_output.hidden_states,
+        # )
 
     def _expand_batch(
         self,
