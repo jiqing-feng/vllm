@@ -37,7 +37,7 @@ from vllm.spec_decode.util import (create_sequence_group_output,
 from vllm.worker.worker import Worker
 from vllm.worker.worker_base import LoraNotSupportedWorkerBase, WorkerBase
 
-from threading import Thread
+from concurrent.futures import ThreadPoolExecutor
 
 logger = init_logger(__name__)
 
@@ -416,9 +416,9 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         request_outputs_2 = []
         execute_model_req = None
         execute_model_req_2 = None
-        sub_thread = Thread()
-        sub_thread.start()
-        sub_thread.join()
+        pool = ThreadPoolExecutor(max_workers=1)
+        sub_thread = pool.submit(print, "start speculative decoding")
+        sub_thread.result()
         while llm_engine.has_unfinished_requests():
             seq_group_metadata_list, scheduler_outputs = llm_engine.scheduler[0].schedule()
             finished_requests_ids = llm_engine.scheduler[0].get_and_reset_finished_requests_ids()
@@ -456,7 +456,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             # Generate proposals using draft worker.
             if execute_model_req and run_spec == "run_spec":
                 proposals_1 = self.proposer_worker.get_spec_proposals(execute_model_req, self._seq_with_bonus_token_in_last_step)
-            sub_thread.join()
+            sub_thread.result()
 
             if execute_model_req_2 and run_spec_2 == "run_spec":
                 self.scorer.proposal_scores_2 = self.scorer.proposal_scores_2
@@ -509,13 +509,11 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                 self.previous_hidden_states_2 = None
 
             if execute_model_req and run_spec == "run_spec":
-                sub_thread = Thread(target=self.scorer.score_proposals, args=(execute_model_req, proposals_1, 1))
-                sub_thread.start()
-                # self.scorer.score_proposals(execute_model_req, proposals_1, 1)
+                sub_thread = pool.submit(self.scorer.score_proposals, execute_model_req, proposals_1, 1)
 
             if execute_model_req_2 and run_spec_2 == "run_spec":
                 proposals_2 = self.proposer_worker.get_spec_proposals(execute_model_req_2, self._seq_with_bonus_token_in_last_step)
-            sub_thread.join()
+            sub_thread.result()
 
             if execute_model_req and run_spec == "run_spec":
                 self.scorer.proposal_scores_1 = self.scorer.proposal_scores_1
@@ -538,13 +536,13 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
 
             total_in_toks, total_out_toks = self.update_pbar(request_outputs, total_in_toks, total_out_toks, outputs, pbar)
             if execute_model_req_2 and run_spec_2 == "run_spec":
-                sub_thread = Thread(target=self.scorer.score_proposals, args=(execute_model_req_2, proposals_2, 2))
-                sub_thread.start()
-                # self.scorer.score_proposals(execute_model_req_2, proposals_2, 2)
+                sub_thread = pool.submit(self.scorer.score_proposals, execute_model_req_2, proposals_2, 2)
 
         total_in_toks, total_out_toks = self.update_pbar(request_outputs, total_in_toks, total_out_toks, outputs, pbar)
         total_in_toks, total_out_toks = self.update_pbar(request_outputs_2, total_in_toks, total_out_toks, outputs, pbar)
         pbar.close()
+
+        pool.shutdown()
 
         return outputs
 
