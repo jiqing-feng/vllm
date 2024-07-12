@@ -441,7 +441,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                 if run_spec != "run_spec":
                     total_in_toks, total_out_toks = self.update_pbar(request_outputs, total_in_toks, total_out_toks, outputs, pbar)
                     total_in_toks, total_out_toks = self.update_pbar(request_outputs_2, total_in_toks, total_out_toks, outputs, pbar)
-                    output = self._run_no_spec(execute_model_req, skip_proposer=run_spec)
+                    output = self._run_no_spec(execute_model_req, skip_proposer=run_spec, pool=pool)
                     request_outputs = llm_engine._process_model_outputs(
                         output, scheduler_outputs.scheduled_seq_groups,
                         scheduler_outputs.ignored_seq_groups, seq_group_metadata_list)
@@ -502,7 +502,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                 if run_spec_2 != "run_spec":
                     total_in_toks, total_out_toks = self.update_pbar(request_outputs, total_in_toks, total_out_toks, outputs, pbar)
                     total_in_toks, total_out_toks = self.update_pbar(request_outputs_2, total_in_toks, total_out_toks, outputs, pbar)
-                    output_2 = self._run_no_spec(execute_model_req_2, skip_proposer=run_spec_2)
+                    output_2 = self._run_no_spec(execute_model_req_2, skip_proposer=run_spec_2, pool=pool)
                     request_outputs_2 = llm_engine._process_model_outputs(
                         output_2, scheduler_outputs_2.scheduled_seq_groups,
                         scheduler_outputs_2.ignored_seq_groups, seq_group_metadata_list_2)
@@ -631,17 +631,20 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
 
     @nvtx_range("spec_decode_worker._run_no_spec")
     def _run_no_spec(self, execute_model_req: ExecuteModelRequest,
-                     skip_proposer: bool) -> List[SamplerOutput]:
+                     skip_proposer: bool,
+                     pool) -> List[SamplerOutput]:
         """Run a single generation step without any speculation. The input is
         sent to the proposer and scorer model so that the KV cache is consistent
         between the two. When skip_proposer is True, the proposer model is
         not called, meaning that the kv-cache in proposer for requests is not
         updated, so they cannot enable spec decode in the rest decoding.
         """
+        sub_thread = pool.submit(self.scorer_worker.execute_model, execute_model_req)
         if not skip_proposer:
             self.proposer_worker.execute_model(execute_model_req)
 
-        sampler_output = self.scorer_worker.execute_model(execute_model_req)
+        sampler_output = sub_thread.result()
+
         assert len(sampler_output) == 1
         sampler_output = sampler_output[0]
 
