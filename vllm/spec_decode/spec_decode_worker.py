@@ -419,7 +419,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         pool = ThreadPoolExecutor(max_workers=1)
         sub_thread = pool.submit(print, "start speculative decoding")
         sub_thread.result()
-        import time
+        # import time
         while llm_engine.has_unfinished_requests():
             seq_group_metadata_list, scheduler_outputs = llm_engine.scheduler[0].schedule()
             finished_requests_ids = llm_engine.scheduler[0].get_and_reset_finished_requests_ids()
@@ -456,13 +456,13 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
 
             # Generate proposals using draft worker.
             if execute_model_req and run_spec == "run_spec":
-                pre = time.time()
+                # pre = time.time()
                 proposals_1 = self.proposer_worker.get_spec_proposals(execute_model_req, self._seq_with_bonus_token_in_last_step)
-                print(f"proposals_1 time = {(time.time()-pre)*1000}")
-                print(sub_thread.done())
-            pre = time.time()
+            #     print(f"proposals_1 time = {(time.time()-pre)*1000}")
+            #     print(sub_thread.done())
+            # pre = time.time()
             sub_thread.result()
-            print(f"scorer_2 time = {(time.time()-pre)*1000}")
+            # print(f"scorer_2 time = {(time.time()-pre)*1000}")
 
             if execute_model_req_2 and run_spec_2 == "run_spec":
                 self.scorer.proposal_scores_2 = self.scorer.proposal_scores_2
@@ -518,13 +518,13 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                 sub_thread = pool.submit(self.scorer.score_proposals, execute_model_req, proposals_1, 1)
 
             if execute_model_req_2 and run_spec_2 == "run_spec":
-                pre = time.time()
+                # pre = time.time()
                 proposals_2 = self.proposer_worker.get_spec_proposals(execute_model_req_2, self._seq_with_bonus_token_in_last_step)
-                print(f"proposals_2 time = {(time.time()-pre)*1000}")
-                print(sub_thread.done())
-            pre = time.time()
+                # print(f"proposals_2 time = {(time.time()-pre)*1000}")
+                # print(sub_thread.done())
+            # pre = time.time()
             sub_thread.result()
-            print(f"scorer_1 time = {(time.time()-pre)*1000}")
+            # print(f"scorer_1 time = {(time.time()-pre)*1000}")
 
             if execute_model_req and run_spec == "run_spec":
                 self.scorer.proposal_scores_1 = self.scorer.proposal_scores_1
