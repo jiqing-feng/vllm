@@ -9,6 +9,21 @@ from vllm.spec_decode.interfaces import (SpeculativeProposals,
 from vllm.spec_decode.proposer_worker_base import ProposerWorkerBase
 from vllm.spec_decode.util import sampler_output_to_torch
 
+import os
+import threading
+import psutil
+
+def set_cpu_affinity(core_ids):
+    """Set CPU affinity for the current thread."""
+    pid = os.getpid()  # Get the process ID
+    tid = threading.get_native_id()  # Get the native thread ID
+    p = psutil.Process(pid)
+    # Loop through all threads in the process and set affinity for the matching thread ID
+    for thread in p.threads():
+        if thread.id == tid:
+            psutil.Process(thread.id).cpu_affinity(core_ids)
+            break
+
 
 class Top1Proposer(SpeculativeProposer):
     """Helper class which separates out sequences which would exceed the max
@@ -49,6 +64,8 @@ class Top1Proposer(SpeculativeProposer):
         Sequences which would exceed the max model length are skipped during
         speculation.
         """
+        core_ids = [22]
+        set_cpu_affinity(core_ids)
         proposal_len = execute_model_req.num_lookahead_slots
         seq_group_metadata_list = execute_model_req.seq_group_metadata_list
 

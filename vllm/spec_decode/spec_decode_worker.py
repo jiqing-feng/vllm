@@ -482,8 +482,8 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             if execute_model_req and run_spec == "run_spec":
                 # pre = time.time()
                 proposals_1 = self.proposer_worker.get_spec_proposals(execute_model_req, self._seq_with_bonus_token_in_last_step)
-            #     print(f"proposals_1 time = {(time.time()-pre)*1000}")
-            #     print(sub_thread.done())
+                # print(f"proposals_1 time = {(time.time()-pre)*1000}")
+                # print(sub_thread.done())
             # pre = time.time()
             sub_thread.result()
             # print(f"scorer_2 time = {(time.time()-pre)*1000}")
