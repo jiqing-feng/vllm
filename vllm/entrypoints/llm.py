@@ -152,6 +152,7 @@ class LLM:
             disable_custom_all_reduce=disable_custom_all_reduce,
             **kwargs,
         )
+        self.engine_args = engine_args
         self.llm_engine = LLMEngine.from_engine_args(
             engine_args, usage_context=UsageContext.LLM_CLASS)
         self.request_counter = Counter()
@@ -566,7 +567,7 @@ class LLM:
         total_in_toks = 0
         total_out_toks = 0
         # import pdb; pdb.set_trace()
-        if True:
+        if self.engine_args.speculative_model and self.engine_args.cpu_draft_worker:
             outputs = self.llm_engine.run_hete_spec_decode()
         else:
             while self.llm_engine.has_unfinished_requests():
