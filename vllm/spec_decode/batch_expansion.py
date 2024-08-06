@@ -1,6 +1,9 @@
 from itertools import chain, count
 from typing import Iterator, List, Tuple
 
+import os
+import threading
+import psutil
 import torch
 
 from vllm.sequence import (ExecuteModelRequest, SamplerOutput, SequenceData,
@@ -15,6 +18,18 @@ from vllm.worker.worker_base import WorkerBase
 SeqId = int
 TargetSeqId = int
 TokenId = int
+
+
+def set_cpu_affinity(core_ids):
+    """Set CPU affinity for the current thread."""
+    pid = os.getpid()  # Get the process ID
+    tid = threading.get_native_id()  # Get the native thread ID
+    p = psutil.Process(pid)
+    # Loop through all threads in the process and set affinity for the matching thread ID
+    for thread in p.threads():
+        if thread.id == tid:
+            psutil.Process(thread.id).cpu_affinity(core_ids)
+            break
 
 
 class BatchExpansionTop1Scorer(SpeculativeScorer):
@@ -63,6 +78,9 @@ class BatchExpansionTop1Scorer(SpeculativeScorer):
             SpeculativeScores: The scores of each speculative token, along with
                 which sequences were ignored during scoring.
         """
+
+        core_ids = [22]
+        set_cpu_affinity(core_ids) 
 
         # TODO(cade) perform this on GPU to remove blocking call.
         proposal_lens_list = proposals.proposal_lens.tolist()
