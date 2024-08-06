@@ -9,6 +9,7 @@ from vllm.utils import (get_distributed_init_method, get_ip, get_open_port,
                         make_async)
 from vllm.worker.worker_base import WorkerWrapperBase
 
+
 logger = init_logger(__name__)
 
 
@@ -93,7 +94,11 @@ class GPUExecutor(ExecutorBase):
         """
         return self.driver_worker.determine_num_available_blocks()
 
-    def initialize_cache(self, num_gpu_blocks: int, num_cpu_blocks) -> None:
+    def initialize_cache(self,
+                         num_gpu_blocks: int,
+                         num_cpu_blocks: int,
+                         draft_num_gpu_blocks=None,
+                         draft_num_cpu_blocks=None) -> None:
         """Initialize the KV cache by invoking the underlying worker.
         """
         # NOTE: This is logged in the executor because there can be >1 worker
@@ -102,7 +107,15 @@ class GPUExecutor(ExecutorBase):
         logger.info("# GPU blocks: %d, # CPU blocks: %d", num_gpu_blocks,
                     num_cpu_blocks)
 
-        self.driver_worker.initialize_cache(num_gpu_blocks, num_cpu_blocks)
+        if draft_num_gpu_blocks is not None or draft_num_cpu_blocks is not None:
+            logger.info("# draft GPU blocks: %d, # draft CPU blocks: %d",
+                        draft_num_gpu_blocks, draft_num_cpu_blocks)
+
+            self.driver_worker.initialize_cache(num_gpu_blocks, num_cpu_blocks,
+                                                draft_num_gpu_blocks,
+                                                draft_num_cpu_blocks)
+        else:
+            self.driver_worker.initialize_cache(num_gpu_blocks, num_cpu_blocks)
 
     def execute_model(
         self, execute_model_req: ExecuteModelRequest
@@ -148,6 +161,10 @@ class GPUExecutor(ExecutorBase):
         # GPUExecutor will always be healthy as long as
         # it's running.
         return
+
+    def execute_model_hete_spec_decode(self, llm_engine):
+        output = self.driver_worker.execute_model_hete_spec_decode(llm_engine)
+        return output
 
 
 class GPUExecutorAsync(GPUExecutor, ExecutorAsyncBase):
