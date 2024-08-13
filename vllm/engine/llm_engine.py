@@ -312,7 +312,10 @@ class LLMEngine:
         self.scheduler = [
             Scheduler(scheduler_config, cache_config, lora_config,
                       parallel_config.pipeline_parallel_size)
-            # for _ in range(parallel_config.pipeline_parallel_size)
+            for _ in range(parallel_config.pipeline_parallel_size)
+        ] if not getattr(speculative_config, "cpu_draft_worker", None) else [
+            Scheduler(scheduler_config, cache_config, lora_config,
+                      parallel_config.pipeline_parallel_size)
             for _ in range(2)
         ]
 
@@ -915,10 +918,8 @@ class LLMEngine:
             raise NotImplementedError(
                 "Pipeline parallelism is only supported through AsyncLLMEngine "
                 "as performance will be severely degraded otherwise.")
-        seq_group_metadata_list, scheduler_outputs = self.scheduler[0].schedule()
-        finished_requests_ids = self.scheduler[0].get_and_reset_finished_requests_ids()
-        seq_group_metadata_list_2, scheduler_outputs_2 = self.scheduler[1].schedule()
-        finished_requests_ids_2 = self.scheduler[1].get_and_reset_finished_requests_ids()
+        seq_group_metadata_list, scheduler_outputs = self.scheduler[
+            0].schedule()
 
         if not scheduler_outputs.is_empty():
             finished_requests_ids = self.scheduler[
@@ -936,35 +937,15 @@ class LLMEngine:
         else:
             output = []
 
-        if not scheduler_outputs_2.is_empty():
-            execute_model_req_2 = ExecuteModelRequest(
-                seq_group_metadata_list=seq_group_metadata_list_2,
-                blocks_to_swap_in=scheduler_outputs_2.blocks_to_swap_in,
-                blocks_to_swap_out=scheduler_outputs_2.blocks_to_swap_out,
-                blocks_to_copy=scheduler_outputs_2.blocks_to_copy,
-                num_lookahead_slots=scheduler_outputs_2.num_lookahead_slots,
-                running_queue_size=scheduler_outputs_2.running_queue_size,
-                finished_requests_ids=finished_requests_ids_2)
-            output_2 = self.model_executor.execute_model(
-                execute_model_req=execute_model_req_2)
-        else:
-            output_2 = []
-
         request_outputs = self._process_model_outputs(
             output, scheduler_outputs.scheduled_seq_groups,
             scheduler_outputs.ignored_seq_groups, seq_group_metadata_list)
 
-        request_outputs_2 = self._process_model_outputs(
-            output_2, scheduler_outputs_2.scheduled_seq_groups,
-            scheduler_outputs_2.ignored_seq_groups, seq_group_metadata_list_2)
-
         # Log stats.
         self.do_log_stats(scheduler_outputs, output)
-        self.do_log_stats(scheduler_outputs_2, output_2)
 
         # Tracing
         self.do_tracing(scheduler_outputs)
-        self.do_tracing(scheduler_outputs_2)
 
         if not self.has_unfinished_requests():
             # Stop the execute model loop in parallel workers until there are
@@ -974,7 +955,7 @@ class LLMEngine:
             # queued control plane messages, such as add/remove lora adapters.
             self.model_executor.stop_remote_worker_execution_loop()
 
-        return request_outputs, request_outputs_2
+        return request_outputs
 
     def run_hete_spec_decode(self):
         output = self.model_executor.execute_model_hete_spec_decode(self)

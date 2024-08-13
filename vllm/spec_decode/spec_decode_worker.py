@@ -484,14 +484,13 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                 proposals_1 = self.proposer_worker.get_spec_proposals(execute_model_req, self._seq_with_bonus_token_in_last_step)
             #     print(f"proposals_1 time = {(time.time()-pre)*1000}")
             #     print(sub_thread.done())
-            # pre = time.time()
-            sub_thread.result()
-            # print(f"scorer_2 time = {(time.time()-pre)*1000}")
 
             if execute_model_req_2 and run_spec_2 == "run_spec":
-                self.scorer.proposal_scores_2 = self.scorer.proposal_scores_2
+                # pre = time.time()
+                proposal_scores_2 = sub_thread.result()
+                # print(f"scorer_2 time = {(time.time()-pre)*1000}")
                 accepted_token_ids_2, target_logprobs_2 = self._verify_tokens(
-                    execute_model_req_2.seq_group_metadata_list, self.scorer.proposal_scores_2,
+                    execute_model_req_2.seq_group_metadata_list, proposal_scores_2,
                     proposals_2, execute_model_req_2.num_lookahead_slots, 2)
 
                 output_2 = self._create_output_sampler_list(
@@ -539,21 +538,20 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                 self.previous_hidden_states_2 = None
 
             if execute_model_req and run_spec == "run_spec":
-                sub_thread = pool.submit(self.scorer.score_proposals, execute_model_req, proposals_1, 1)
+                sub_thread = pool.submit(self.scorer.score_proposals, execute_model_req, proposals_1)
 
             if execute_model_req_2 and run_spec_2 == "run_spec":
                 # pre = time.time()
                 proposals_2 = self.proposer_worker.get_spec_proposals(execute_model_req_2, self._seq_with_bonus_token_in_last_step)
             #     print(f"proposals_2 time = {(time.time()-pre)*1000}")
             #     print(sub_thread.done())
-            # pre = time.time()
-            sub_thread.result()
-            # print(f"scorer_1 time = {(time.time()-pre)*1000}")
 
             if execute_model_req and run_spec == "run_spec":
-                self.scorer.proposal_scores_1 = self.scorer.proposal_scores_1
+                # pre = time.time()
+                proposal_scores_1 = sub_thread.result()
+                # print(f"scorer_1 time = {(time.time()-pre)*1000}")
                 accepted_token_ids_1, target_logprobs_1 = self._verify_tokens(
-                    execute_model_req.seq_group_metadata_list, self.scorer.proposal_scores_1,
+                    execute_model_req.seq_group_metadata_list, proposal_scores_1,
                     proposals_1, execute_model_req.num_lookahead_slots)
 
                 output = self._create_output_sampler_list(
@@ -571,7 +569,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
 
             total_in_toks, total_out_toks = self.update_pbar(request_outputs, total_in_toks, total_out_toks, outputs, pbar)
             if execute_model_req_2 and run_spec_2 == "run_spec":
-                sub_thread = pool.submit(self.scorer.score_proposals, execute_model_req_2, proposals_2, 2)
+                sub_thread = pool.submit(self.scorer.score_proposals, execute_model_req_2, proposals_2)
 
         total_in_toks, total_out_toks = self.update_pbar(request_outputs, total_in_toks, total_out_toks, outputs, pbar)
         total_in_toks, total_out_toks = self.update_pbar(request_outputs_2, total_in_toks, total_out_toks, outputs, pbar)
@@ -692,18 +690,22 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
     @nvtx_range("spec_decode_worker._run_no_spec")
     def _run_no_spec(self, execute_model_req: ExecuteModelRequest,
                      skip_proposer: bool,
-                     pool) -> List[SamplerOutput]:
+                     pool=None) -> List[SamplerOutput]:
         """Run a single generation step without any speculation. The input is
         sent to the proposer and scorer model so that the KV cache is consistent
         between the two. When skip_proposer is True, the proposer model is
         not called, meaning that the kv-cache in proposer for requests is not
         updated, so they cannot enable spec decode in the rest decoding.
         """
-        sub_thread = pool.submit(self.scorer_worker.execute_model, execute_model_req)
+        if pool is not None:
+            sub_thread = pool.submit(self.scorer_worker.execute_model, execute_model_req)
         if not skip_proposer:
             self.proposer_worker.execute_model(execute_model_req)
 
-        sampler_output = sub_thread.result()
+        if pool is not None:
+            sampler_output = sub_thread.result()
+        else:
+            sampler_output = self.scorer_worker.execute_model(execute_model_req)
 
         assert len(sampler_output) == 1
         sampler_output = sampler_output[0]
