@@ -82,6 +82,7 @@ class Worker(LocalOrDistributedWorkerBase):
 
         # Return hidden states from target model if the draft model is an
         # mlp_speculator
+        self.cpu_draft_worker = getattr(speculative_config, "cpu_draft_worker", False)
         speculative_args = {} if speculative_config is None \
             or (speculative_config.draft_model_config.model ==
                 model_config.model) \
@@ -265,15 +266,16 @@ class Worker(LocalOrDistributedWorkerBase):
         self._warm_up_model()
 
     def _init_cache_engine(self):
+        kv_engine_size = 2 if getattr(self, "cpu_draft_worker", False) else self.parallel_config.pipeline_parallel_size
         assert self.cache_config.num_gpu_blocks is not None
         self.cache_engine = [
             CacheEngine(self.cache_config, self.model_config,
-                        self.parallel_config, self.device_config)
-            for _ in range(2)
+                        self.parallel_config, self.device_config, kv_engine_size)
+            for _ in range(kv_engine_size)
         ]
         self.gpu_cache = [
             self.cache_engine[ve].gpu_cache
-            for ve in range(2)
+            for ve in range(kv_engine_size)
         ]
 
     def _warm_up_model(self) -> None:
