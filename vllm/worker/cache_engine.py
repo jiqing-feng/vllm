@@ -62,6 +62,7 @@ class CacheEngine:
             model_config.dtype,
             cache_config.cache_dtype,
             self.block_size,
+            "cuda",
         )
 
         # Initialize the cache.
