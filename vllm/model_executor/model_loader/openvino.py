@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 import openvino as ov
+import nncf
 import torch
 from huggingface_hub import HfApi
 from openvino._offline_transformations import paged_attention_transformation
@@ -103,7 +104,26 @@ def _require_model_export(model_id, revision=None, subfolder=None):
                 or ov_model_path.replace(".xml", ".bin") not in model_files)
     except Exception:
         return True
+    
+from torch.utils.data import Dataset
+class NNCFCustomDataset(Dataset):
+    def __init__(self, data_count=100, dummy_data=None):
+        self.dataset = []
+        for i in range(data_count):
+            self.dataset.append([dummy_data])
+    def __len__(self):
+        return len(self.dataset)
+    
+    def __getitem__(self,idx):
+        image = self.dataset[idx]
+        return image
 
+def transform_fn(data_item):
+    inputs = {"speech":data_item[0].squeeze(0),
+              "speech_lengths":data_item[1].squeeze(0),
+              "bias_embed":data_item[2].squeeze(0),               
+            }
+    return inputs
 
 class OpenVINOCasualLM(nn.Module):
 
@@ -117,8 +137,11 @@ class OpenVINOCasualLM(nn.Module):
         self.logits_processor = LogitsProcessor(
             model_config.hf_config.vocab_size, logits_as_input=True)
         self.sampler = Sampler()
-
+        self.ov_save = False
+        self.nncf_quant = False
         export = _require_model_export(model_config.model)
+        print("======_require_model_export======",export)
+
         if export:
             logger.warning(
                 f"Provided model id {model_config.model} does not "  # noqa: G004
@@ -141,13 +164,25 @@ class OpenVINOCasualLM(nn.Module):
             load_in_8bit=load_in_8bit,
             trust_remote_code=model_config.trust_remote_code,
         )
-
+        
         paged_attention_transformation(pt_model.model)
         _modify_cache_parameters(pt_model.model, kv_cache_dtype,
                                  device_config.device.type == "cpu")
+        self.ov_model = pt_model.model
+        self.ov_model_path = f"{model_config.model}/openvino_model.xml"
+        if self.ov_save:
+            # ov_model = ov.convert_model(self.pt_model,inputs)
+            ov.save_model(self.ov_model, self.ov_model_path)
+            print("====Success convert OpenVINO IR model====",self.ov_model_path)
+        
 
         core = ov.Core()
-        ov_compiled = core.compile_model(pt_model.model, "CPU")
+        config = {
+            "CPU_DENORMALS_OPTIMIZATION": "YES",
+            "DYNAMIC_QUANTIZATION_GROUP_SIZE": "0",
+            # "DYNAMIC_QUANTIZATION_GROUP_SIZE": "0"
+        }
+        ov_compiled = core.compile_model(pt_model.model, "CPU", config)
         self.ov_request = ov_compiled.create_infer_request()
 
     def forward(
@@ -158,7 +193,7 @@ class OpenVINOCasualLM(nn.Module):
         attn_metadata: OpenVINOAttentionMetadata,
     ) -> torch.Tensor:
         flatten_kv_cache = _flattenize_inputs(kv_caches)
-
+        
         inputs = [
             input_ids,
             positions,
@@ -170,8 +205,29 @@ class OpenVINOCasualLM(nn.Module):
             attn_metadata.max_context_len,
         ]
 
-        self.ov_request.start_async(inputs, share_inputs=True)
-        self.ov_request.wait()
+        if self.nncf_quant:
+            print("=======NNCF INT8 model quantization=========")
+            print(self.ov_model.inputs)
+            data_count = 100
+            int8_ir_save_path = self.ov_model_path.replace(".xml","_int8.xml")
+            custom_dataset = NNCFCustomDataset(data_count, inputs)
+            val_data_loader = torch.utils.data.DataLoader(custom_dataset, batch_size=1, num_workers=8, shuffle=False)
+            calibration_dataset = nncf.Dataset(val_data_loader)
+            # calibration_dataset = nncf.Dataset(val_data_loader, transform_fn)
+
+            # 使用 NNCF 进行量化
+            ov_quantized_model = nncf.quantize(self.ov_model, calibration_dataset,
+                                                preset=nncf.QuantizationPreset.MIXED,)
+
+            # 保存量化后的模型
+            ov.save_model(ov_quantized_model, int8_ir_save_path)
+            print("====Success convert OpenVINO IR model====",int8_ir_save_path)
+            self.nncf_quant = False
+        
+
+        #self.ov_request.start_async(inputs, share_inputs=True)
+        #self.ov_request.wait()
+        self.ov_request.infer(inputs, share_inputs=True)
 
         logits = torch.from_numpy(self.ov_request.get_tensor("logits").data)
 
@@ -180,7 +236,9 @@ class OpenVINOCasualLM(nn.Module):
 
     def compute_logits(self, hidden_states: torch.Tensor,
                        sampling_metadata: SamplingMetadata) -> torch.Tensor:
-        hidden_states = _prune_hidden_states(hidden_states, sampling_metadata)
+        #hidden_states = _prune_hidden_states(hidden_states, sampling_metadata)
+        if hidden_states.shape[0] != sampling_metadata.selected_token_indices.shape[0]:
+            hidden_states = _prune_hidden_states(hidden_states, sampling_metadata)
         logits = self.logits_processor(None, hidden_states, sampling_metadata)
         return logits
 

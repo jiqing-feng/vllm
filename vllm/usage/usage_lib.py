@@ -172,7 +172,7 @@ class UsageMessage:
 
         # vLLM information
         self.context = usage_context.value
-        self.vllm_version = VLLM_VERSION
+        # self.vllm_version = VLLM_VERSION
         self.model_architecture = model_architecture
 
         # Metadata
