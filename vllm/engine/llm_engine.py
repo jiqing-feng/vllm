@@ -333,10 +333,7 @@ class LLMEngine:
                       parallel_config.pipeline_parallel_size)
             for _ in range(parallel_config.pipeline_parallel_size)
         ] if not getattr(speculative_config, "cpu_draft_worker", None) else [
-            Scheduler(scheduler_config, cache_config, lora_config,
-                      parallel_config.pipeline_parallel_size)
-            for _ in range(2)
-        ]
+            Scheduler(scheduler_config, cache_config, lora_config, 2) for _ in range(2)]
 
         # Metric Logging.
         if self.log_stats:

@@ -272,20 +272,20 @@ class CPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         self.cache_engine = [
             CPUCacheEngine(self.cache_config, self.model_config,
                            self.parallel_config, self.device_config)
-            for _ in range(self.parallel_config.pipeline_parallel_size)
+            for _ in range(2)
         ]
         self.cpu_cache = [
             self.cache_engine[ve].cpu_cache
-            for ve in range(self.parallel_config.pipeline_parallel_size)
+            for ve in range(2)
         ]
         self.model_runner.block_size = self.cache_engine[0].block_size
 
         assert all(
             self.cpu_cache[ve] is not None
-            for ve in range(self.parallel_config.pipeline_parallel_size))
+            for ve in range(2))
 
         # Populate the cache to warmup the memory
-        for ve in range(self.parallel_config.pipeline_parallel_size):
+        for ve in range(2):
             for layer_cache in self.cpu_cache[ve]:
                 layer_cache.fill_(0)
 

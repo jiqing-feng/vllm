@@ -481,6 +481,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             run_spec = None
             if not scheduler_outputs.is_empty():
                 execute_model_req = ExecuteModelRequest(
+                    virtual_engine=0,
                     seq_group_metadata_list=seq_group_metadata_list,
                     blocks_to_swap_in=scheduler_outputs.blocks_to_swap_in,
                     blocks_to_swap_out=scheduler_outputs.blocks_to_swap_out,
@@ -550,6 +551,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             run_spec_2 = None
             if not scheduler_outputs_2.is_empty():
                 execute_model_req_2 = ExecuteModelRequest(
+                    virtual_engine=1,
                     seq_group_metadata_list=seq_group_metadata_list_2,
                     blocks_to_swap_in=scheduler_outputs_2.blocks_to_swap_in,
                     blocks_to_swap_out=scheduler_outputs_2.blocks_to_swap_out,

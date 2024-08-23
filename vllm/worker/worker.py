@@ -269,11 +269,11 @@ class Worker(LocalOrDistributedWorkerBase):
         self.cache_engine = [
             CacheEngine(self.cache_config, self.model_config,
                         self.parallel_config, self.device_config)
-            for _ in range(self.parallel_config.pipeline_parallel_size)
+            for _ in range(2)
         ]
         self.gpu_cache = [
             self.cache_engine[ve].gpu_cache
-            for ve in range(self.parallel_config.pipeline_parallel_size)
+            for ve in range(2)
         ]
 
     def _warm_up_model(self) -> None:
