@@ -332,7 +332,8 @@ class LLMEngine:
             Scheduler(scheduler_config, cache_config, lora_config,
                       parallel_config.pipeline_parallel_size)
             for _ in range(parallel_config.pipeline_parallel_size)
-        ]
+        ] if not getattr(speculative_config, "cpu_draft_worker", None) else [
+            Scheduler(scheduler_config, cache_config, lora_config, 2) for _ in range(2)]
 
         # Metric Logging.
         if self.log_stats:
@@ -386,8 +387,14 @@ class LLMEngine:
         The workers will determine the number of blocks in both the GPU cache
         and the swap CPU cache.
         """
-        num_gpu_blocks, num_cpu_blocks = (
-            self.model_executor.determine_num_available_blocks())
+
+        num_blocks = self.model_executor.determine_num_available_blocks()
+
+        num_gpu_blocks, num_cpu_blocks = num_blocks[0], num_blocks[1]
+        draft_num_gpu_blocks, draft_num_cpu_blocks = None, None
+        if len(num_blocks) == 4:
+            draft_num_gpu_blocks, draft_num_cpu_blocks = num_blocks[
+                2], num_blocks[3]
 
         if self.cache_config.num_gpu_blocks_override is not None:
             num_gpu_blocks_override = self.cache_config.num_gpu_blocks_override
@@ -400,7 +407,15 @@ class LLMEngine:
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
 
-        self.model_executor.initialize_cache(num_gpu_blocks, num_cpu_blocks)
+        # Spec decode executor takes more parameters.
+        if draft_num_gpu_blocks or draft_num_cpu_blocks:
+            self.model_executor.initialize_cache(num_gpu_blocks,
+                                                 num_cpu_blocks,
+                                                 draft_num_gpu_blocks,
+                                                 draft_num_cpu_blocks)
+        else:
+            self.model_executor.initialize_cache(num_gpu_blocks,
+                                                 num_cpu_blocks)
 
     @classmethod
     def _get_executor_cls(cls,
@@ -1345,6 +1360,10 @@ class LLMEngine:
             self.model_executor.stop_remote_worker_execution_loop()
 
         return request_outputs
+
+    def run_hete_spec_decode(self):
+        output = self.model_executor.execute_model_hete_spec_decode(self)
+        return output
 
     def add_logger(self, logger_name: str, logger: StatLoggerBase) -> None:
         if logger_name in self.stat_loggers:

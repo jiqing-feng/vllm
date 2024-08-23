@@ -8,7 +8,7 @@ import vllm.envs as envs
 from vllm.attention import get_attn_backend
 from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoRAConfig,
                          ModelConfig, ParallelConfig, PromptAdapterConfig,
-                         SchedulerConfig)
+                         SchedulerConfig, SpeculativeConfig)
 from vllm.distributed import (ensure_model_parallel_initialized,
                               init_distributed_environment)
 from vllm.logger import init_logger
@@ -62,6 +62,7 @@ class CPUCacheEngine:
             self.model_config.dtype,
             cache_config.cache_dtype,
             self.block_size,
+            "cpu",
         )
 
         # Initialize the cache.
@@ -134,6 +135,7 @@ class CPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         lora_config: Optional[LoRAConfig] = None,
         kv_cache_dtype: Optional[str] = "auto",
         prompt_adapter_config: Optional[PromptAdapterConfig] = None,
+        speculative_config: Optional[SpeculativeConfig] = None,
         is_driver_worker: bool = False,
     ) -> None:
         self.model_config = model_config
@@ -147,6 +149,7 @@ class CPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         self.distributed_init_method = distributed_init_method
         self.lora_config = lora_config
         self.prompt_adapter_config = prompt_adapter_config
+        self.speculative_config = speculative_config
         self.is_driver_worker = is_driver_worker
         if self.is_driver_worker:
             assert self.rank == 0, "The driver worker must have rank 0."
@@ -180,6 +183,7 @@ class CPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         self.cpu_cache: List[List[torch.Tensor]]
 
     def init_device(self) -> None:
+        self.device = torch.device("cpu")
         if self.local_omp_cpuid != "all":
             torch.ops._C_utils.init_cpu_threads_env(self.local_omp_cpuid)
 
@@ -189,6 +193,14 @@ class CPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
 
     def load_model(self):
         self.model_runner.load_model()
+
+    @property
+    def vocab_size(self) -> int:
+        return self.model_runner.vocab_size
+
+    @property
+    def max_model_len(self) -> int:
+        return self.model_config.max_model_len
 
     def determine_num_available_blocks(self) -> Tuple[int, int]:
         """Determine the number of blocks available for the KV cache.
@@ -214,8 +226,11 @@ class CPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         num_cpu_blocks = 0
         return num_gpu_blocks, num_cpu_blocks
 
-    def initialize_cache(self, num_gpu_blocks: int,
-                         num_cpu_blocks: int) -> None:
+    def initialize_cache(
+        self,
+        num_gpu_blocks: int,
+        num_cpu_blocks: int,
+    ) -> None:
         """Initialize the KV cache. Currently, swappable CPU memory is not
         supported.
 
@@ -254,23 +269,24 @@ class CPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
                 "initializing the engine.")
 
     def _init_cache_engine(self) -> None:
+        kv_engine_size = 2 if self.speculative_config.cpu_draft_worker else self.parallel_config.pipeline_parallel_size
         self.cache_engine = [
             CPUCacheEngine(self.cache_config, self.model_config,
                            self.parallel_config, self.device_config)
-            for _ in range(self.parallel_config.pipeline_parallel_size)
+            for _ in range(kv_engine_size)
         ]
         self.cpu_cache = [
             self.cache_engine[ve].cpu_cache
-            for ve in range(self.parallel_config.pipeline_parallel_size)
+            for ve in range(kv_engine_size)
         ]
         self.model_runner.block_size = self.cache_engine[0].block_size
 
         assert all(
             self.cpu_cache[ve] is not None
-            for ve in range(self.parallel_config.pipeline_parallel_size))
+            for ve in range(kv_engine_size))
 
         # Populate the cache to warmup the memory
-        for ve in range(self.parallel_config.pipeline_parallel_size):
+        for ve in range(kv_engine_size):
             for layer_cache in self.cpu_cache[ve]:
                 layer_cache.fill_(0)
 

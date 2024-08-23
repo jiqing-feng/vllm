@@ -147,6 +147,7 @@ class EngineArgs:
 
     otlp_traces_endpoint: Optional[str] = None
     collect_detailed_traces: Optional[str] = None
+    cpu_draft_worker: Optional[bool] = None
 
     def __post_init__(self):
         if self.tokenizer is None:
@@ -731,6 +732,10 @@ class EngineArgs:
             " set. If set, it will collect detailed traces for the specified "
             "modules. This involves use of possibly costly and or blocking "
             "operations and hence might have a performance impact.")
+        parser.add_argument('--cpu-draft-worker',
+                            type=bool,
+                            default=EngineArgs.cpu_draft_worker,
+                            help='Run draft model on CPU.')
 
         return parser
 
@@ -883,6 +888,7 @@ class EngineArgs:
             typical_acceptance_sampler_posterior_alpha=self.
             typical_acceptance_sampler_posterior_alpha,
             disable_logprobs=self.disable_logprobs_during_spec_decoding,
+            cpu_draft_worker=self.cpu_draft_worker,
         )
 
         if self.num_scheduler_steps > 1:

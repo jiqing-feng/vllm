@@ -172,6 +172,7 @@ class LLM:
             disable_custom_all_reduce=disable_custom_all_reduce,
             **kwargs,
         )
+        self.engine_args = engine_args
         self.llm_engine = LLMEngine.from_engine_args(
             engine_args, usage_context=UsageContext.LLM_CLASS)
         self.request_counter = Counter()
@@ -682,10 +683,14 @@ class LLM:
         outputs: List[Union[RequestOutput, EmbeddingRequestOutput]] = []
         total_in_toks = 0
         total_out_toks = 0
-        while self.llm_engine.has_unfinished_requests():
-            step_outputs = self.llm_engine.step()
-            for output in step_outputs:
-                if output.finished:
+        if self.engine_args.speculative_model and self.engine_args.cpu_draft_worker:
+            outputs = self.llm_engine.run_hete_spec_decode()
+        else:
+            while self.llm_engine.has_unfinished_requests():
+                step_outputs = self.llm_engine.step()
+                for output in step_outputs:
+                    if not output.finished:
+                        continue
                     outputs.append(output)
                     if use_tqdm:
                         if isinstance(output, RequestOutput):
@@ -700,8 +705,8 @@ class LLM:
                                 f"est. speed input: {in_spd:.2f} toks/s, "
                                 f"output: {out_spd:.2f} toks/s")
                         pbar.update(1)
-        if use_tqdm:
-            pbar.close()
+            if use_tqdm:
+                pbar.close()
         # Sort the outputs by request ID.
         # This is necessary because some requests may be finished earlier than
         # its previous requests.
