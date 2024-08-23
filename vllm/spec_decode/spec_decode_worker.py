@@ -510,23 +510,31 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             # Generate proposals using draft worker.
             if execute_model_req and run_spec == "run_spec":
                 # pre = time.time()
-                proposals_1 = self.proposer_worker.get_spec_proposals(execute_model_req, self._seq_with_bonus_token_in_last_step)
+                with Timer() as proposal_timer_1:
+                    proposals_1 = self.proposer_worker.get_spec_proposals(execute_model_req, self._seq_with_bonus_token_in_last_step)
             #     print(f"proposals_1 time = {(time.time()-pre)*1000}")
             #     print(sub_thread.done())
 
             if execute_model_req_2 and run_spec_2 == "run_spec":
                 # pre = time.time()
-                proposal_scores_2 = sub_thread.result()
+                with Timer() as scoring_timer_2:
+                    proposal_scores_2 = sub_thread.result()
                 # print(f"scorer_2 time = {(time.time()-pre)*1000}")
-                accepted_token_ids_2, target_logprobs_2 = self._verify_tokens(
-                    execute_model_req_2.seq_group_metadata_list, proposal_scores_2,
-                    proposals_2, execute_model_req_2.num_lookahead_slots, 2)
+                with Timer() as verification_timer_2:
+                    accepted_token_ids_2, target_logprobs_2 = self._verify_tokens(
+                        execute_model_req_2.seq_group_metadata_list, proposal_scores_2,
+                        proposals_2, execute_model_req_2.num_lookahead_slots, 2)
+
+                stage_times = (proposal_timer_2.elapsed_time_ms / execute_model_req_2.num_lookahead_slots,
+                       scoring_timer_2.elapsed_time_ms,
+                       verification_timer_2.elapsed_time_ms)
 
                 output_2 = self._create_output_sampler_list(
                     execute_model_req_2.seq_group_metadata_list,
                     accepted_token_ids_2,
                     target_logprobs=target_logprobs_2,
-                    k=execute_model_req_2.num_lookahead_slots)
+                    k=execute_model_req_2.num_lookahead_slots,
+                    stage_times=stage_times,)
 
                 request_outputs_2 = llm_engine._process_model_outputs(
                     output_2, scheduler_outputs_2.scheduled_seq_groups,
@@ -571,23 +579,31 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
 
             if execute_model_req_2 and run_spec_2 == "run_spec":
                 # pre = time.time()
-                proposals_2 = self.proposer_worker.get_spec_proposals(execute_model_req_2, self._seq_with_bonus_token_in_last_step)
+                with Timer() as proposal_timer_2:
+                    proposals_2 = self.proposer_worker.get_spec_proposals(execute_model_req_2, self._seq_with_bonus_token_in_last_step)
             #     print(f"proposals_2 time = {(time.time()-pre)*1000}")
             #     print(sub_thread.done())
 
             if execute_model_req and run_spec == "run_spec":
                 # pre = time.time()
-                proposal_scores_1 = sub_thread.result()
+                with Timer() as scoring_timer_1:
+                    proposal_scores_1 = sub_thread.result()
                 # print(f"scorer_1 time = {(time.time()-pre)*1000}")
-                accepted_token_ids_1, target_logprobs_1 = self._verify_tokens(
-                    execute_model_req.seq_group_metadata_list, proposal_scores_1,
-                    proposals_1, execute_model_req.num_lookahead_slots)
+                with Timer() as verification_timer_1:
+                    accepted_token_ids_1, target_logprobs_1 = self._verify_tokens(
+                        execute_model_req.seq_group_metadata_list, proposal_scores_1,
+                        proposals_1, execute_model_req.num_lookahead_slots)
+
+                stage_times = (proposal_timer_1.elapsed_time_ms / execute_model_req.num_lookahead_slots,
+                       scoring_timer_1.elapsed_time_ms,
+                       verification_timer_1.elapsed_time_ms)
 
                 output = self._create_output_sampler_list(
                     execute_model_req.seq_group_metadata_list,
                     accepted_token_ids_1,
                     target_logprobs=target_logprobs_1,
-                    k=execute_model_req.num_lookahead_slots)
+                    k=execute_model_req.num_lookahead_slots,
+                    stage_times=stage_times,)
 
                 request_outputs = llm_engine._process_model_outputs(
                     output, scheduler_outputs.scheduled_seq_groups,
