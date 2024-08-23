@@ -56,8 +56,6 @@ class BatchExpansionTop1Scorer(SpeculativeScorer):
         self._scorer_worker = scorer_worker
         self._device = device
         self._vocab_size = vocab_size
-        self.proposal_scores_1 = None
-        self.proposal_scores_2 = None
 
     @nvtx_range("BatchExpansionTop1Scorer.score_proposals")
     def score_proposals(
