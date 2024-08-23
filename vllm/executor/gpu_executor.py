@@ -9,6 +9,7 @@ from vllm.utils import (get_distributed_init_method, get_ip, get_open_port,
                         make_async)
 from vllm.worker.worker_base import WorkerBase, WorkerWrapperBase
 
+
 logger = init_logger(__name__)
 
 
@@ -179,6 +180,10 @@ class GPUExecutor(ExecutorBase):
         # GPUExecutor will always be healthy as long as
         # it's running.
         return
+
+    def execute_model_hete_spec_decode(self, llm_engine):
+        output = self.driver_worker.execute_model_hete_spec_decode(llm_engine)
+        return output
 
 
 class GPUExecutorAsync(GPUExecutor, ExecutorAsyncBase):

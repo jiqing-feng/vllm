@@ -332,7 +332,8 @@ class LLMEngine:
             Scheduler(scheduler_config, cache_config, lora_config,
                       parallel_config.pipeline_parallel_size)
             for _ in range(parallel_config.pipeline_parallel_size)
-        ]
+        ] if not getattr(speculative_config, "cpu_draft_worker", None) else [
+            Scheduler(scheduler_config, cache_config, lora_config, 2) for _ in range(2)]
 
         # Metric Logging.
         if self.log_stats:
@@ -1359,6 +1360,10 @@ class LLMEngine:
             self.model_executor.stop_remote_worker_execution_loop()
 
         return request_outputs
+
+    def run_hete_spec_decode(self):
+        output = self.model_executor.execute_model_hete_spec_decode(self)
+        return output
 
     def add_logger(self, logger_name: str, logger: StatLoggerBase) -> None:
         if logger_name in self.stat_loggers:

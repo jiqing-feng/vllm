@@ -4,7 +4,9 @@ from functools import cached_property
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import torch
+from tqdm import tqdm
 
+from vllm.outputs import EmbeddingRequestOutput, RequestOutput
 from vllm.config import ParallelConfig, SpeculativeConfig
 from vllm.distributed.communication_op import broadcast_tensor_dict
 from vllm.logger import init_logger
@@ -35,6 +37,8 @@ from vllm.spec_decode.util import (Timer, create_sequence_group_output,
                                    split_batch_by_proposal_len)
 from vllm.worker.worker import Worker
 from vllm.worker.worker_base import LoraNotSupportedWorkerBase, WorkerBase
+
+from concurrent.futures import ThreadPoolExecutor
 
 logger = init_logger(__name__)
 
@@ -272,6 +276,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         # Hidden states from target model to pass to proposer
         # in the subsequent step.
         self.previous_hidden_states: Optional[HiddenStates] = None
+        self.previous_hidden_states_2: Optional[HiddenStates] = None
         self._disable_logprobs = disable_logprobs
         self._disable_log_stats = disable_log_stats
 
@@ -446,6 +451,224 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                                                    num_lookahead_slots)
 
     @torch.inference_mode()
+    def execute_model_hete_spec_decode(self, llm_engine):
+        # Run the engine.
+        num_requests = llm_engine.get_num_unfinished_requests()
+        pbar = tqdm(
+            total=num_requests,
+            desc="Processed prompts",
+            dynamic_ncols=True,
+            postfix=(f"est. speed input: {0:.2f} toks/s, "
+                        f"output: {0:.2f} toks/s"),
+        )
+        outputs: List[Union[RequestOutput, EmbeddingRequestOutput]] = []
+        total_in_toks = 0
+        total_out_toks = 0
+
+        request_outputs = []
+        request_outputs_2 = []
+        execute_model_req = None
+        execute_model_req_2 = None
+        pool = ThreadPoolExecutor(max_workers=1)
+        sub_thread = pool.submit(print, "start speculative decoding")
+        sub_thread.result()
+        # import time
+        while llm_engine.has_unfinished_requests():
+            seq_group_metadata_list, scheduler_outputs = llm_engine.scheduler[0].schedule()
+            finished_requests_ids = llm_engine.scheduler[0].get_and_reset_finished_requests_ids()
+
+            execute_model_req = None
+            run_spec = None
+            if not scheduler_outputs.is_empty():
+                execute_model_req = ExecuteModelRequest(
+                    virtual_engine=0,
+                    seq_group_metadata_list=seq_group_metadata_list,
+                    blocks_to_swap_in=scheduler_outputs.blocks_to_swap_in,
+                    blocks_to_swap_out=scheduler_outputs.blocks_to_swap_out,
+                    blocks_to_copy=scheduler_outputs.blocks_to_copy,
+                    num_lookahead_slots=scheduler_outputs.num_lookahead_slots,
+                    running_queue_size=scheduler_outputs.running_queue_size,
+                    finished_requests_ids=finished_requests_ids)
+
+            if execute_model_req:
+                run_spec = self.get_if_run_no_spec(execute_model_req)
+                if run_spec != "run_spec":
+                    total_in_toks, total_out_toks = self.update_pbar(request_outputs, total_in_toks, total_out_toks, outputs, pbar)
+                    total_in_toks, total_out_toks = self.update_pbar(request_outputs_2, total_in_toks, total_out_toks, outputs, pbar)
+                    output = self._run_no_spec(execute_model_req, skip_proposer=run_spec, pool=pool)
+                    request_outputs = llm_engine._process_model_outputs(
+                        output, scheduler_outputs.scheduled_seq_groups,
+                        scheduler_outputs.ignored_seq_groups, seq_group_metadata_list)
+
+                    llm_engine.do_log_stats(scheduler_outputs, output)
+                    llm_engine.do_tracing(scheduler_outputs)
+
+            if execute_model_req and run_spec == "run_spec":
+                # Pass last hidden states from target model to proposer
+                execute_model_req.previous_hidden_states = self.previous_hidden_states
+                self.previous_hidden_states = None
+
+            # Generate proposals using draft worker.
+            if execute_model_req and run_spec == "run_spec":
+                # pre = time.time()
+                with Timer() as proposal_timer_1:
+                    proposals_1 = self.proposer_worker.get_spec_proposals(execute_model_req, self._seq_with_bonus_token_in_last_step)
+            #     print(f"proposals_1 time = {(time.time()-pre)*1000}")
+            #     print(sub_thread.done())
+
+            if execute_model_req_2 and run_spec_2 == "run_spec":
+                # pre = time.time()
+                with Timer() as scoring_timer_2:
+                    proposal_scores_2 = sub_thread.result()
+                # print(f"scorer_2 time = {(time.time()-pre)*1000}")
+                with Timer() as verification_timer_2:
+                    accepted_token_ids_2, target_logprobs_2 = self._verify_tokens(
+                        execute_model_req_2.seq_group_metadata_list, proposal_scores_2,
+                        proposals_2, execute_model_req_2.num_lookahead_slots, 2)
+
+                stage_times = (proposal_timer_2.elapsed_time_ms / execute_model_req_2.num_lookahead_slots,
+                       scoring_timer_2.elapsed_time_ms,
+                       verification_timer_2.elapsed_time_ms)
+
+                output_2 = self._create_output_sampler_list(
+                    execute_model_req_2.seq_group_metadata_list,
+                    accepted_token_ids_2,
+                    target_logprobs=target_logprobs_2,
+                    k=execute_model_req_2.num_lookahead_slots,
+                    stage_times=stage_times,)
+
+                request_outputs_2 = llm_engine._process_model_outputs(
+                    output_2, scheduler_outputs_2.scheduled_seq_groups,
+                    scheduler_outputs_2.ignored_seq_groups, seq_group_metadata_list_2)
+
+                llm_engine.do_log_stats(scheduler_outputs_2, output_2)
+                llm_engine.do_tracing(scheduler_outputs_2)
+
+            total_in_toks, total_out_toks = self.update_pbar(request_outputs_2, total_in_toks, total_out_toks, outputs, pbar)
+            seq_group_metadata_list_2, scheduler_outputs_2 = llm_engine.scheduler[1].schedule()
+            finished_requests_ids_2 = llm_engine.scheduler[1].get_and_reset_finished_requests_ids()
+            execute_model_req_2 = None
+            run_spec_2 = None
+            if not scheduler_outputs_2.is_empty():
+                execute_model_req_2 = ExecuteModelRequest(
+                    virtual_engine=1,
+                    seq_group_metadata_list=seq_group_metadata_list_2,
+                    blocks_to_swap_in=scheduler_outputs_2.blocks_to_swap_in,
+                    blocks_to_swap_out=scheduler_outputs_2.blocks_to_swap_out,
+                    blocks_to_copy=scheduler_outputs_2.blocks_to_copy,
+                    num_lookahead_slots=scheduler_outputs_2.num_lookahead_slots,
+                    running_queue_size=scheduler_outputs_2.running_queue_size,
+                    finished_requests_ids=finished_requests_ids_2)
+            if execute_model_req_2:
+                run_spec_2 = self.get_if_run_no_spec(execute_model_req_2)
+                if run_spec_2 != "run_spec":
+                    total_in_toks, total_out_toks = self.update_pbar(request_outputs, total_in_toks, total_out_toks, outputs, pbar)
+                    total_in_toks, total_out_toks = self.update_pbar(request_outputs_2, total_in_toks, total_out_toks, outputs, pbar)
+                    output_2 = self._run_no_spec(execute_model_req_2, skip_proposer=run_spec_2, pool=pool)
+                    request_outputs_2 = llm_engine._process_model_outputs(
+                        output_2, scheduler_outputs_2.scheduled_seq_groups,
+                        scheduler_outputs_2.ignored_seq_groups, seq_group_metadata_list_2)
+
+                    llm_engine.do_log_stats(scheduler_outputs_2, output_2)
+                    llm_engine.do_tracing(scheduler_outputs_2)
+            if execute_model_req_2 and run_spec_2 == "run_spec":
+                # Pass last hidden states from target model to proposer
+                execute_model_req_2.previous_hidden_states = self.previous_hidden_states_2
+                self.previous_hidden_states_2 = None
+
+            if execute_model_req and run_spec == "run_spec":
+                sub_thread = pool.submit(self.scorer.score_proposals, execute_model_req, proposals_1)
+
+            if execute_model_req_2 and run_spec_2 == "run_spec":
+                # pre = time.time()
+                with Timer() as proposal_timer_2:
+                    proposals_2 = self.proposer_worker.get_spec_proposals(execute_model_req_2, self._seq_with_bonus_token_in_last_step)
+            #     print(f"proposals_2 time = {(time.time()-pre)*1000}")
+            #     print(sub_thread.done())
+
+            if execute_model_req and run_spec == "run_spec":
+                # pre = time.time()
+                with Timer() as scoring_timer_1:
+                    proposal_scores_1 = sub_thread.result()
+                # print(f"scorer_1 time = {(time.time()-pre)*1000}")
+                with Timer() as verification_timer_1:
+                    accepted_token_ids_1, target_logprobs_1 = self._verify_tokens(
+                        execute_model_req.seq_group_metadata_list, proposal_scores_1,
+                        proposals_1, execute_model_req.num_lookahead_slots)
+
+                stage_times = (proposal_timer_1.elapsed_time_ms / execute_model_req.num_lookahead_slots,
+                       scoring_timer_1.elapsed_time_ms,
+                       verification_timer_1.elapsed_time_ms)
+
+                output = self._create_output_sampler_list(
+                    execute_model_req.seq_group_metadata_list,
+                    accepted_token_ids_1,
+                    target_logprobs=target_logprobs_1,
+                    k=execute_model_req.num_lookahead_slots,
+                    stage_times=stage_times,)
+
+                request_outputs = llm_engine._process_model_outputs(
+                    output, scheduler_outputs.scheduled_seq_groups,
+                    scheduler_outputs.ignored_seq_groups, seq_group_metadata_list)
+
+                llm_engine.do_log_stats(scheduler_outputs, output)
+                llm_engine.do_tracing(scheduler_outputs)
+
+            total_in_toks, total_out_toks = self.update_pbar(request_outputs, total_in_toks, total_out_toks, outputs, pbar)
+            if execute_model_req_2 and run_spec_2 == "run_spec":
+                sub_thread = pool.submit(self.scorer.score_proposals, execute_model_req_2, proposals_2)
+
+        total_in_toks, total_out_toks = self.update_pbar(request_outputs, total_in_toks, total_out_toks, outputs, pbar)
+        total_in_toks, total_out_toks = self.update_pbar(request_outputs_2, total_in_toks, total_out_toks, outputs, pbar)
+        pbar.close()
+
+        pool.shutdown()
+
+        return outputs
+
+
+    def get_if_run_no_spec(self, execute_model_req):
+        self._track_finished_requests(execute_model_req)
+        disable_all_speculation = self._should_disable_all_speculation(
+            execute_model_req)
+        num_lookahead_slots = execute_model_req.num_lookahead_slots
+        broadcast_dict = dict(
+            num_lookahead_slots=num_lookahead_slots,
+            disable_all_speculation=disable_all_speculation,
+        )
+        broadcast_tensor_dict(broadcast_dict, src=self._driver_rank)
+
+        assert execute_model_req.seq_group_metadata_list is not None, (
+            "speculative decoding requires non-None seq_group_metadata_list")
+
+        self._maybe_disable_speculative_tokens(
+            disable_all_speculation, execute_model_req.seq_group_metadata_list)
+
+        if num_lookahead_slots == 0 or len(execute_model_req.seq_group_metadata_list) == 0 or disable_all_speculation:
+            return disable_all_speculation
+        else:
+            return "run_spec"
+
+    def update_pbar(self, request_outputs, total_in_toks, total_out_toks, outputs, pbar):
+        while request_outputs:
+            output = request_outputs.pop(0)
+            if output.finished:
+                outputs.append(output)
+                if isinstance(output, RequestOutput):
+                    # Calculate tokens only for RequestOutput
+                    total_in_toks += len(output.prompt_token_ids)
+                    in_spd = total_in_toks / pbar.format_dict["elapsed"]
+                    total_out_toks += sum(
+                        len(stp.token_ids) for stp in output.outputs)
+                    out_spd = total_out_toks / pbar.format_dict[
+                        "elapsed"]
+                    pbar.postfix = (
+                        f"est. speed input: {in_spd:.2f} toks/s, "
+                        f"output: {out_spd:.2f} toks/s")
+                pbar.update(1)
+        return total_in_toks, total_out_toks
+
+    @torch.inference_mode()
     def start_worker_execution_loop(self) -> None:
         """Execute model loop to perform speculative decoding
         in parallel worker."""
@@ -513,15 +736,24 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
 
     @nvtx_range("spec_decode_worker._run_no_spec")
     def _run_no_spec(self, execute_model_req: ExecuteModelRequest,
-                     skip_proposer: bool) -> List[SamplerOutput]:
+                     skip_proposer: bool,
+                     pool=None) -> List[SamplerOutput]:
         """Run a single generation step without any speculation. The input is
         sent to the proposer and scorer model so that the KV cache is consistent
         between the two. When skip_proposer is True, the proposer model is
         not called, meaning that the kv-cache in proposer for requests is not
         updated, so they cannot enable spec decode in the rest decoding.
         """
+        if pool is not None:
+            sub_thread = pool.submit(self.scorer_worker.execute_model, execute_model_req)
+        if not skip_proposer:
+            self.proposer_worker.execute_model(execute_model_req)
 
-        sampler_output = self.scorer_worker.execute_model(execute_model_req)
+        if pool is not None:
+            sampler_output = sub_thread.result()
+        else:
+            sampler_output = self.scorer_worker.execute_model(execute_model_req)
+
         assert len(sampler_output) == 1
         sampler_output = sampler_output[0]
 
@@ -649,6 +881,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         proposal_scores: SpeculativeScores,
         proposals: SpeculativeProposals,
         max_proposal_len: int,
+        req_id: int = 1,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Determine which speculative tokens are accepted using the
         probabilities of each token according to the proposer and scorer models.
@@ -728,9 +961,12 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             second_last_token_hidden_states = hidden_states[:, -2]  # b x d
             hidden_states = hidden_states.gather(1, index).squeeze(1)  # b x d
             # Store hidden states from target model for subsequent decode step
-            self.previous_hidden_states = HiddenStates(
-                hidden_states, seq_group_metadata_list,
-                second_last_token_hidden_states)
+            if req_id == 2:
+                self.previous_hidden_states_2 = HiddenStates(hidden_states, seq_group_metadata_list,
+                                                            second_last_token_hidden_states)
+            else:
+                self.previous_hidden_states = HiddenStates(hidden_states, seq_group_metadata_list,
+                                                            second_last_token_hidden_states)
 
         return accepted_token_ids, logprobs
 
