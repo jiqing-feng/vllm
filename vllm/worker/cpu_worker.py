@@ -138,6 +138,7 @@ class CPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         speculative_config: Optional[SpeculativeConfig] = None,
         is_driver_worker: bool = False,
     ) -> None:
+        # print("############################Init CPU worker ######################")
         self.model_config = model_config
         self.parallel_config = parallel_config
         self.scheduler_config = scheduler_config

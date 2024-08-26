@@ -155,6 +155,7 @@ class OpenVINOWorker(LoraNotSupportedWorkerBase):
         prompt_adapter_config: Optional[PromptAdapterConfig] = None,
         is_driver_worker: bool = False,
     ) -> None:
+        # print("############################Init OpenVINO worker ######################")
         self.model_config = model_config
         self.parallel_config = parallel_config
         self.parallel_config.rank = rank

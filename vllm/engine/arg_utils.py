@@ -148,6 +148,7 @@ class EngineArgs:
     otlp_traces_endpoint: Optional[str] = None
     collect_detailed_traces: Optional[str] = None
     cpu_draft_worker: Optional[bool] = None
+    backend_device: Optional[bool] = None
 
     def __post_init__(self):
         if self.tokenizer is None:
@@ -889,6 +890,7 @@ class EngineArgs:
             typical_acceptance_sampler_posterior_alpha,
             disable_logprobs=self.disable_logprobs_during_spec_decoding,
             cpu_draft_worker=self.cpu_draft_worker,
+            backend_device=self.backend_device,
         )
 
         if self.num_scheduler_steps > 1:
