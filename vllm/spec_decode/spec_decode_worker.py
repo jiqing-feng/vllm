@@ -165,7 +165,8 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
 
                 cpu_draft_worker_kwargs["device_config"].device = torch.device(
                     "cpu")
-                cpu_draft_worker_kwargs["device_config"].device_type = "openvino" 
+                cpu_draft_worker_kwargs["device_config"].device_type = "openvino"
+                cpu_draft_worker_kwargs.pop("observability_config")
                 import openvino as ov
                 cpu_draft_worker_kwargs["kv_cache_dtype"] = ov.Type.u8
                 cpu_draft_worker_kwargs["cache_config"].cache_dtype = ov.Type.u8
