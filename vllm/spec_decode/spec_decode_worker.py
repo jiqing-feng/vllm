@@ -937,7 +937,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         #     draft_token_ids=proposal_token_ids,
         #     **sampler_extra_kwargs,
         # )
-        matched_num = ((~(proposal_token_ids == proposal_scores.token_ids[:, :-1])).cumsum(dim=-1) < 1).sum(-1)
+        matched_num = ((~(proposal_token_ids == proposal_scores.token_ids.to(proposal_token_ids.device)[:, :-1])).cumsum(dim=-1) < 1).sum(-1)
         accepted_token_ids = proposal_scores.token_ids.clone()
         for i in range(accepted_token_ids.shape[0]):
             accepted_token_ids[i][matched_num[i] + 1 : ] = -1
