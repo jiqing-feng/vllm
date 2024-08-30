@@ -105,11 +105,9 @@ def get_attn_backend(
         from vllm.attention.backends.blocksparse_attn import (
             BlocksparseFlashAttentionBackend)
         return BlocksparseFlashAttentionBackend
-
     backend = which_attn_to_use(num_heads, head_size, num_kv_heads,
                                 sliding_window, dtype, kv_cache_dtype,
                                 block_size, device)
-
     if backend == _Backend.FLASH_ATTN:
         from vllm.attention.backends.flash_attn import (  # noqa: F401
             FlashAttentionBackend)
@@ -160,7 +158,7 @@ def which_attn_to_use(
     dtype: torch.dtype,
     kv_cache_dtype: Optional[str],
     block_size: int,
-    device=None,
+    device="cuda",
 ) -> _Backend:
     """Returns which flash attention backend to use."""
     # Default case.
@@ -187,7 +185,7 @@ def which_attn_to_use(
 
         return _Backend.TORCH_SDPA
 
-    if is_openvino():
+    if device == "openvino":
         if selected_backend != _Backend.OPENVINO:
             logger.info("Cannot use %s backend on OpenVINO.", selected_backend)
         return _Backend.OPENVINO

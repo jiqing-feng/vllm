@@ -147,23 +147,28 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                 proposer_worker = MLPSpeculatorWorker(**draft_worker_kwargs)
             elif cpu_draft_worker:
                 cpu_draft_worker_kwargs = copy.deepcopy(draft_worker_kwargs)
-                from vllm.executor.cpu_executor import (
-                    _verify_and_get_cache_config, _verify_and_get_model_config,
-                    _verify_and_get_scheduler_config)
+                # from vllm.executor.cpu_executor import (
+                #     _verify_and_get_cache_config, _verify_and_get_model_config,
+                #     _verify_and_get_scheduler_config)
+                from vllm.executor.openvino_executor import (
+                    _verify_and_get_cache_config, _verify_and_get_model_config)
                 cpu_draft_worker_kwargs[
                     "cache_config"] = _verify_and_get_cache_config(
                         cpu_draft_worker_kwargs["cache_config"])
                 cpu_draft_worker_kwargs[
                     "model_config"] = _verify_and_get_model_config(
                         cpu_draft_worker_kwargs["model_config"])
-                cpu_draft_worker_kwargs[
-                    "scheduler_config"] = _verify_and_get_scheduler_config(
-                        cpu_draft_worker_kwargs["scheduler_config"])
+
+                # cpu_draft_worker_kwargs[
+                #     "scheduler_config"] = _verify_and_get_scheduler_config(
+                #         cpu_draft_worker_kwargs["scheduler_config"])
 
                 cpu_draft_worker_kwargs["device_config"].device = torch.device(
                     "cpu")
-                cpu_draft_worker_kwargs["device_config"].device_type = "cpu"
-                cpu_draft_worker_kwargs.pop("observability_config")
+                cpu_draft_worker_kwargs["device_config"].device_type = "openvino" 
+                import openvino as ov
+                cpu_draft_worker_kwargs["kv_cache_dtype"] = ov.Type.u8
+                cpu_draft_worker_kwargs["cache_config"].cache_dtype = ov.Type.u8
                 proposer_worker = CPUMultiStepWorker(**cpu_draft_worker_kwargs)
             elif draft_worker_kwargs[
                     "model_config"].hf_config.model_type == "medusa":

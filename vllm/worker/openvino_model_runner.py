@@ -78,6 +78,7 @@ class OpenVINOModelRunner:
             self.model_config.dtype,
             self.kv_cache_dtype,
             self.block_size,
+            "openvino",
         )
 
         # Multi-modal data support
@@ -306,6 +307,10 @@ class OpenVINOModelRunner:
             sampling_metadata,
             multi_modal_kwargs,
         )
+
+    @property
+    def vocab_size(self) -> int:
+        return self.model_config.get_vocab_size()
 
     @torch.inference_mode()
     def execute_model(
