@@ -930,13 +930,17 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                 if sgm.sampling_params.seed is not None
             }
 
-        accepted_token_ids = self.spec_decode_sampler(
-            target_probs=proposal_verifier_probs,
-            bonus_token_ids=bonus_token_ids,
-            draft_probs=proposal_probs,
-            draft_token_ids=proposal_token_ids,
-            **sampler_extra_kwargs,
-        )
+        # accepted_token_ids = self.spec_decode_sampler(
+        #     target_probs=proposal_verifier_probs,
+        #     bonus_token_ids=bonus_token_ids,
+        #     draft_probs=proposal_probs,
+        #     draft_token_ids=proposal_token_ids,
+        #     **sampler_extra_kwargs,
+        # )
+        matched_num = ((~(proposal_token_ids == proposal_scores.token_ids[:, :-1])).cumsum(dim=-1) < 1).sum(-1)
+        accepted_token_ids = proposal_scores.token_ids.clone()
+        for i in range(accepted_token_ids.shape[0]):
+            accepted_token_ids[i][matched_num[i] + 1 : ] = -1
 
         # Append output tokens from non-speculative sequences to
         # the accepted token ids tensor.
@@ -949,6 +953,11 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         # Rearrange so that results are in the order of the original seq group
         # metadata.
         accepted_token_ids[original_indices] = accepted_token_ids.clone()
+
+        # num_spec_tokens = proposal_token_ids.numel()
+        # accept_num = (torch.where(accepted_token_ids > -0.5, 1, 0).sum(-1) - 1).item()
+        # print(f"num_spec_tokens = {num_spec_tokens}")
+        # print(f"accept_num = {accept_num}")
 
         hidden_states = proposal_scores.hidden_states
         if hidden_states is not None:
