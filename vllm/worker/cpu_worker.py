@@ -185,7 +185,7 @@ class CPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
     def init_device(self) -> None:
         self.device = torch.device("cpu")
         if self.local_omp_cpuid != "all":
-            torch.ops._C_utils.init_cpu_threads_env(self.local_omp_cpuid)
+            torch.ops._C_cpu_utils.init_cpu_threads_env(self.local_omp_cpuid)
 
         self.init_distributed_environment()
         # Set random seed.
@@ -276,14 +276,12 @@ class CPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
             for _ in range(kv_engine_size)
         ]
         self.cpu_cache = [
-            self.cache_engine[ve].cpu_cache
-            for ve in range(kv_engine_size)
+            self.cache_engine[ve].cpu_cache for ve in range(kv_engine_size)
         ]
         self.model_runner.block_size = self.cache_engine[0].block_size
 
-        assert all(
-            self.cpu_cache[ve] is not None
-            for ve in range(kv_engine_size))
+        assert all(self.cpu_cache[ve] is not None
+                   for ve in range(kv_engine_size))
 
         # Populate the cache to warmup the memory
         for ve in range(kv_engine_size):
