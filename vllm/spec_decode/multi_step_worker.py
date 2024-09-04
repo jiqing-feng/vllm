@@ -366,8 +366,7 @@ class MultiStepWorker(Worker, ProposerWorkerBase):
                 "MultiStepWorker does not support beam search.")
 
 
-# Copied from MultiStepWorker
-class CPUMultiStepWorker(OpenVINOWorker):
+class CPUMultiStepWorker:
     """The MultiStepWorker is equivalent to a Worker except that it allows
     multiple forward passes in a single call, assuming the scheduler has
     allocated enough space to store the additional KV. This reduces overhead
@@ -378,7 +377,6 @@ class CPUMultiStepWorker(OpenVINOWorker):
     beam search requires memory allocations during sequence forks and thus
     requires more thought for MultiStepWorker support.
     """
-
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
