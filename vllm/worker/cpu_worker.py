@@ -182,10 +182,38 @@ class CPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         self.cache_engine: List[CPUCacheEngine]
         self.cpu_cache: List[List[torch.Tensor]]
 
+        # Torch profiler. Enabled and configured through env vars:
+        # VLLM_TORCH_PROFILER_DIR=/path/to/save/trace
+        if envs.VLLM_TORCH_PROFILER_DIR:
+            torch_profiler_trace_dir = envs.VLLM_TORCH_PROFILER_DIR
+            logger.info("Profiling enabled. Traces will be saved to: %s",
+                        torch_profiler_trace_dir)
+            self.profiler = torch.profiler.profile(
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                ],
+                with_stack=True,
+                on_trace_ready=torch.profiler.tensorboard_trace_handler(
+                    torch_profiler_trace_dir, use_gzip=True))
+        else:
+            self.profiler = None
+
+    def start_profile(self):
+        if self.profiler is None:
+            raise RuntimeError("Profiler is not enabled.")
+        self.profiler.start()
+
+    def stop_profile(self):
+        if self.profiler is None:
+            raise RuntimeError("Profiler is not enabled.")
+        self.profiler.stop()
+
     def init_device(self) -> None:
         self.device = torch.device("cpu")
         if self.local_omp_cpuid != "all":
-            torch.ops._C_cpu_utils.init_cpu_threads_env(self.local_omp_cpuid)
+            ret = torch.ops._C_cpu_utils.init_cpu_threads_env(
+                self.local_omp_cpuid)
+            logger.info(ret)
 
         self.init_distributed_environment()
         # Set random seed.
@@ -337,7 +365,15 @@ class CPUWorker(LoraNotSupportedWorkerBase, LocalOrDistributedWorkerBase):
         )
 
         # A small all_reduce for warmup.
-        torch.distributed.all_reduce(torch.zeros(1).cpu())
+        try:
+            torch.distributed.all_reduce(torch.zeros(1).cpu())
+        except Exception as e:
+            logger.warning(
+                "torch.distributed.all_reduce failed because of %s. "
+                "Custom allreduce do not support CPU backend. You may run "
+                "heterogeneous speculative decoding, please notice it does "
+                "not support TP or PP for now if the target model and the "
+                "draft model are on different devices", e)
 
         ensure_model_parallel_initialized(
             parallel_config.tensor_parallel_size,
