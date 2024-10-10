@@ -10,10 +10,15 @@ endif()
 
 include_directories("${CMAKE_SOURCE_DIR}/csrc")
 
+if(ENV{VLLM_TARGET_DEVICE} STREQUAL "cpu")
+    list(APPEND CXX_COMPILE_FLAGS_CPU
+        "-DENABLE_DEF")
+endif()
+
 #
 # Check the compile flags
 #
-list(APPEND CXX_COMPILE_FLAGS
+list(APPEND CXX_COMPILE_FLAGS_CPU
     "-fopenmp"
     "-DVLLM_CPU_EXTENSION")
 
@@ -51,7 +56,7 @@ find_isa(${CPUINFO} "POWER10" POWER10_FOUND)
 find_isa(${CPUINFO} "POWER9" POWER9_FOUND)
 
 if (AVX512_FOUND AND NOT AVX512_DISABLED)
-    list(APPEND CXX_COMPILE_FLAGS
+    list(APPEND CXX_COMPILE_FLAGS_CPU
         "-mavx512f"
         "-mavx512vl"
         "-mavx512bw"
@@ -61,7 +66,7 @@ if (AVX512_FOUND AND NOT AVX512_DISABLED)
     if (AVX512BF16_FOUND OR ENABLE_AVX512BF16)
         if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND
             CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12.3)
-            list(APPEND CXX_COMPILE_FLAGS "-mavx512bf16")
+            list(APPEND CXX_COMPILE_FLAGS_CPU "-mavx512bf16")
         else()
             message(WARNING "Disable AVX512-BF16 ISA support, requires gcc/g++ >= 12.3")
         endif()
@@ -69,12 +74,12 @@ if (AVX512_FOUND AND NOT AVX512_DISABLED)
         message(WARNING "Disable AVX512-BF16 ISA support, no avx512_bf16 found in local CPU flags." " If cross-compilation is required, please set env VLLM_CPU_AVX512BF16=1.")
     endif()
 elseif (AVX2_FOUND)
-    list(APPEND CXX_COMPILE_FLAGS "-mavx2")
+    list(APPEND CXX_COMPILE_FLAGS_CPU "-mavx2")
     message(WARNING "vLLM CPU backend using AVX2 ISA")
 elseif (POWER9_FOUND OR POWER10_FOUND)
     message(STATUS "PowerPC detected")
     # Check for PowerPC VSX support
-    list(APPEND CXX_COMPILE_FLAGS
+    list(APPEND CXX_COMPILE_FLAGS_CPU
         "-mvsx"
         "-mcpu=native"
         "-mtune=native")
@@ -82,19 +87,19 @@ else()
     message(FATAL_ERROR "vLLM CPU backend requires AVX512 or AVX2 or Power9+ ISA support.")
 endif()
 
-message(STATUS "CPU extension compile flags: ${CXX_COMPILE_FLAGS}")
+message(STATUS "CPU extension compile flags: ${CXX_COMPILE_FLAGS_CPU}")
 
-list(APPEND LIBS numa)
+list(APPEND LIBS_CPU numa)
 
 # Appending the dnnl library for the AVX2 and AVX512, as it is not utilized by Power architecture.
 if (AVX2_FOUND OR AVX512_FOUND)
-    list(APPEND LIBS dnnl)
+    list(APPEND LIBS_CPU dnnl)
 endif()
 
 #
-# _C_cpu extension
+# _C extension
 #
-set(VLLM_EXT_SRC
+set(VLLM_EXT_SRC_CPU
     "csrc/cpu/activation.cpp"
     "csrc/cpu/attention.cpp"
     "csrc/cpu/cache.cpp"
@@ -104,24 +109,26 @@ set(VLLM_EXT_SRC
     "csrc/cpu/torch_bindings.cpp")
 
 if (AVX512_FOUND AND NOT AVX512_DISABLED)
-    set(VLLM_EXT_SRC
+    set(VLLM_EXT_SRC_CPU
         "csrc/cpu/quant.cpp"
-        ${VLLM_EXT_SRC})
+        ${VLLM_EXT_SRC_CPU})
 endif()
 
 #
 # Define extension targets
 #
 
-define_gpu_extension_target(
-    _C_cpu
-    DESTINATION vllm
-    LANGUAGE CXX
-    SOURCES ${VLLM_EXT_SRC}
-    LIBRARIES ${LIBS}
-    COMPILE_FLAGS ${CXX_COMPILE_FLAGS}
-    USE_SABI 3
-    WITH_SOABI
-)
+if(ENV{VLLM_TARGET_DEVICE} STREQUAL "cpu")
+    define_gpu_extension_target(
+        _C
+        DESTINATION vllm
+        LANGUAGE CXX
+        SOURCES ${VLLM_EXT_SRC_CPU}
+        LIBRARIES ${LIBS_CPU}
+        COMPILE_FLAGS ${CXX_COMPILE_FLAGS_CPU}
+        USE_SABI 3
+        WITH_SOABI
+    )
+endif()
 
 message(STATUS "Enabling C extension.")

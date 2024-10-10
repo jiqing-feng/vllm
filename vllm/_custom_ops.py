@@ -18,11 +18,6 @@ if not current_platform.is_tpu():
     except ImportError as e:
         logger.warning("Failed to import from vllm._C with %r", e)
 
-    try:
-        import vllm._C_cpu
-    except ImportError as e:
-        logger.warning("Failed to import from vllm._C_cpu with %r", e)
-
 if current_platform.is_rocm():
     import vllm._rocm_C  # noqa: F401
 
@@ -72,32 +67,32 @@ def hint_on_error(fn):
 
 # activation ops
 def silu_and_mul(out: torch.Tensor, x: torch.Tensor) -> None:
-    ops = torch.ops._C_cpu if x.device.type == "cpu" else torch.ops._C
+    ops = torch.ops._C
     ops.silu_and_mul(out, x)
 
 
 def gelu_and_mul(out: torch.Tensor, x: torch.Tensor) -> None:
-    ops = torch.ops._C_cpu if x.device.type == "cpu" else torch.ops._C
+    ops = torch.ops._C
     ops.gelu_and_mul(out, x)
 
 
 def gelu_tanh_and_mul(out: torch.Tensor, x: torch.Tensor) -> None:
-    ops = torch.ops._C_cpu if x.device.type == "cpu" else torch.ops._C
+    ops = torch.ops._C
     ops.gelu_tanh_and_mul(out, x)
 
 
 def gelu_fast(out: torch.Tensor, x: torch.Tensor) -> None:
-    ops = torch.ops._C_cpu if x.device.type == "cpu" else torch.ops._C
+    ops = torch.ops._C
     ops.gelu_fast(out, x)
 
 
 def gelu_new(out: torch.Tensor, x: torch.Tensor) -> None:
-    ops = torch.ops._C_cpu if x.device.type == "cpu" else torch.ops._C
+    ops = torch.ops._C
     ops.gelu_new(out, x)
 
 
 def gelu_quick(out: torch.Tensor, x: torch.Tensor) -> None:
-    ops = torch.ops._C_cpu if x.device.type == "cpu" else torch.ops._C
+    ops = torch.ops._C
     ops.gelu_quick(out, x)
 
 
@@ -123,7 +118,7 @@ def paged_attention_v1(
     blocksparse_block_size: int = 64,
     blocksparse_head_sliding_step: int = 0,
 ) -> None:
-    ops = torch.ops._C_cpu if query.device.type == "cpu" else torch.ops._C
+    ops = torch.ops._C
     ops.paged_attention_v1(out, query, key_cache, value_cache, num_kv_heads,
                            scale, block_tables, seq_lens, block_size,
                            max_seq_len, alibi_slopes, kv_cache_dtype, k_scale,
@@ -156,7 +151,7 @@ def paged_attention_v2(
     blocksparse_block_size: int = 64,
     blocksparse_head_sliding_step: int = 0,
 ) -> None:
-    ops = torch.ops._C_cpu if query.device.type == "cpu" else torch.ops._C
+    ops = torch.ops._C
     ops.paged_attention_v2(out, exp_sum, max_logits, tmp_out, query, key_cache,
                            value_cache, num_kv_heads, scale, block_tables,
                            seq_lens, block_size, max_seq_len, alibi_slopes,
@@ -201,7 +196,7 @@ def rotary_embedding(
     cos_sin_cache: torch.Tensor,
     is_neox: bool,
 ) -> None:
-    ops = torch.ops._C_cpu if query.device.type == "cpu" else torch.ops._C
+    ops = torch.ops._C
     ops.rotary_embedding(positions, query, key, head_size, cos_sin_cache,
                          is_neox)
 
@@ -219,13 +214,13 @@ def batched_rotary_embedding(positions: torch.Tensor, query: torch.Tensor,
 # layer norm ops
 def rms_norm(out: torch.Tensor, input: torch.Tensor, weight: torch.Tensor,
              epsilon: float) -> None:
-    ops = torch.ops._C_cpu if input.device.type == "cpu" else torch.ops._C
+    ops = torch.ops._C
     ops.rms_norm(out, input, weight, epsilon)
 
 
 def fused_add_rms_norm(input: torch.Tensor, residual: torch.Tensor,
                        weight: torch.Tensor, epsilon: float) -> None:
-    ops = torch.ops._C_cpu if input.device.type == "cpu" else torch.ops._C
+    ops = torch.ops._C
     ops.fused_add_rms_norm(input, residual, weight, epsilon)
 
 
@@ -526,7 +521,7 @@ def cutlass_scaled_mm(a: torch.Tensor,
     n = b.shape[1]
     out = torch.empty((m, n), dtype=out_dtype, device=a.device)
 
-    ops = torch.ops._C_cpu if a.device.type == "cpu" else torch.ops._C
+    ops = torch.ops._C
     ops.cutlass_scaled_mm(out, a, b, scale_a, scale_b, bias)
 
     return out
@@ -758,7 +753,7 @@ def scaled_int8_quant(
     Returns:
       Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]] : Output int8 tensor, scales, and optionally azp.
     """
-    ops = torch.ops._C_cpu if input.device.type == "cpu" else torch.ops._C
+    ops = torch.ops._C
     output = torch.empty_like(input, dtype=torch.int8)
     if scale is not None:
         # static-per-tensor quantization.
@@ -893,7 +888,7 @@ def reshape_and_cache(
     k_scale: float,
     v_scale: float,
 ) -> None:
-    ops = torch.ops._C_cpu_cache_ops if key.device.type == "cpu" else torch.ops._C_cache_ops
+    ops = torch.ops._C
     ops.reshape_and_cache(key, value, key_cache, value_cache, slot_mapping,
                           kv_cache_dtype, k_scale, v_scale)
 
@@ -917,8 +912,7 @@ def reshape_and_cache_flash(
 def copy_blocks(key_caches: List[torch.Tensor],
                 value_caches: List[torch.Tensor],
                 block_mapping: torch.Tensor) -> None:
-    ops = torch.ops._C_cpu_cache_ops if key_caches[
-        0].device.type == "cpu" else torch.ops._C_cache_ops
+    ops = torch.ops._C
     ops.copy_blocks(key_caches, value_caches, block_mapping)
 
 
