@@ -159,12 +159,9 @@ class EngineArgs:
 
     otlp_traces_endpoint: Optional[str] = None
     collect_detailed_traces: Optional[str] = None
-<<<<<<< HEAD
     cpu_draft_worker: Optional[bool] = None
-=======
     disable_async_output_proc: bool = False
     override_neuron_config: Optional[Dict[str, Any]] = None
->>>>>>> main
 
     def __post_init__(self):
         if self.tokenizer is None:
