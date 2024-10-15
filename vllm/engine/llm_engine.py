@@ -396,21 +396,14 @@ class LLMEngine:
         # NOTE: the cache_config here have been updated with the numbers of
         # GPU and CPU blocks, which are profiled in the distributed executor.
         self.scheduler = [
-<<<<<<< HEAD
-            Scheduler(scheduler_config, cache_config, lora_config,
-                      parallel_config.pipeline_parallel_size)
-            for _ in range(parallel_config.pipeline_parallel_size)
-        ] if not getattr(speculative_config, "cpu_draft_worker", None) else [
-            Scheduler(scheduler_config, cache_config, lora_config, 2) for _ in range(2)]
-=======
             Scheduler(
                 scheduler_config, cache_config, lora_config,
                 parallel_config.pipeline_parallel_size,
                 self.async_callbacks[v_id]
                 if model_config.use_async_output_proc else None)
             for v_id in range(parallel_config.pipeline_parallel_size)
-        ]
->>>>>>> main
+        ] if not getattr(speculative_config, "cpu_draft_worker", None) else [
+            Scheduler(scheduler_config, cache_config, lora_config, 2) for _ in range(2)]
 
         # Metric Logging.
         if self.log_stats:

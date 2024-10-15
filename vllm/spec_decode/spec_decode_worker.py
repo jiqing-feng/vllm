@@ -924,7 +924,6 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                 if sgm.sampling_params.seed is not None
             }
 
-<<<<<<< HEAD
         # accepted_token_ids = self.spec_decode_sampler(
         #     target_probs=proposal_verifier_probs,
         #     bonus_token_ids=bonus_token_ids,
@@ -937,15 +936,6 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         for i in range(accepted_token_ids.shape[0]):
             accepted_token_ids[i][matched_num[i] + 1 : ] = -1
 
-=======
-        accepted_token_ids = self.spec_decode_sampler(
-            target_with_bonus_probs=proposal_verifier_probs,
-            bonus_token_ids=bonus_token_ids,
-            draft_probs=proposal_probs,
-            draft_token_ids=proposal_token_ids,
-            **sampler_extra_kwargs,
-        )
->>>>>>> main
         # Append output tokens from non-speculative sequences to
         # the accepted token ids tensor.
         non_spec_token_ids = non_spec_token_ids.expand(-1, max_proposal_len +

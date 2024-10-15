@@ -28,16 +28,6 @@ class RayXPUExecutor(RayGPUExecutor, XPUExecutor):
         }, ) for (_, _) in worker_node_and_gpu_ids]
         return all_args_to_update_environment_variables
 
-<<<<<<< HEAD
-    def initialize_cache(self,
-                         num_gpu_blocks: int,
-                         num_cpu_blocks: int,
-                         draft_num_gpu_blocks=None,
-                         draft_num_cpu_blocks=None) -> None:
-        """Initialize the KV cache in all workers.
-        """
-=======
->>>>>>> main
 
 class RayXPUExecutorAsync(RayXPUExecutor, RayGPUExecutorAsync):
 

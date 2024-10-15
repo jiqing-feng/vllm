@@ -182,17 +182,15 @@ class GPUExecutor(ExecutorBase):
         # it's running.
         return
 
-<<<<<<< HEAD
     def execute_model_hete_spec_decode(self, llm_engine):
         output = self.driver_worker.execute_model_hete_spec_decode(llm_engine)
         return output
-=======
+
     def start_profile(self) -> None:
         self.driver_worker.start_profile()
 
     def stop_profile(self) -> None:
         self.driver_worker.stop_profile()
->>>>>>> main
 
 
 class GPUExecutorAsync(GPUExecutor, ExecutorAsyncBase):
