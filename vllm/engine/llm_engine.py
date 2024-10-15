@@ -375,7 +375,7 @@ class LLMEngine:
         self.cached_scheduler_outputs = [
             SchedulerOutputState()
             for _ in range(self.parallel_config.pipeline_parallel_size)
-        ] if not getattr(speculative_config, "cpu_draft_worker", None) else [
+        ] if not getattr(speculative_config, "cpu_draft_worker", False) else [
             SchedulerOutputState()
             for _ in range(2)
         ]
@@ -383,7 +383,7 @@ class LLMEngine:
         self.scheduler_contexts = [
             SchedulerContext()
             for _ in range(self.parallel_config.pipeline_parallel_size)
-        ] if not getattr(speculative_config, "cpu_draft_worker", None) else [
+        ] if not getattr(speculative_config, "cpu_draft_worker", False) else [
             SchedulerContext()
             for _ in range(2)
         ]
@@ -392,7 +392,7 @@ class LLMEngine:
             functools.partial(self._process_model_outputs,
                               ctx=self.scheduler_contexts[v_id])
             for v_id in range(self.parallel_config.pipeline_parallel_size)
-        ] if not getattr(speculative_config, "cpu_draft_worker", None) else [
+        ] if not getattr(speculative_config, "cpu_draft_worker", False) else [
             functools.partial(self._process_model_outputs,
                               ctx=self.scheduler_contexts[v_id])
             for v_id in range(2)
@@ -412,8 +412,14 @@ class LLMEngine:
                 self.async_callbacks[v_id]
                 if model_config.use_async_output_proc else None)
             for v_id in range(parallel_config.pipeline_parallel_size)
-        ] if not getattr(speculative_config, "cpu_draft_worker", None) else [
-            Scheduler(scheduler_config, cache_config, lora_config, 2) for _ in range(2)]
+        ] if not getattr(speculative_config, "cpu_draft_worker", False) else [
+            Scheduler(
+                scheduler_config, cache_config, lora_config,
+                2,
+                self.async_callbacks[v_id]
+                if model_config.use_async_output_proc else None)
+            for v_id in range(2)
+        ]
 
         # Metric Logging.
         if self.log_stats:
@@ -1251,6 +1257,7 @@ class LLMEngine:
             # We need to do this here so that last step's sampled_token_ids can
             # be passed to the next iteration for PP.
             if self.scheduler_config.is_multi_step:
+                import pdb; pdb.set_trace()
                 self._update_cached_scheduler_output(virtual_engine, outputs)
         else:
             # Nothing scheduled => If there is pending async postprocessor,
@@ -1348,7 +1355,7 @@ class LLMEngine:
     def _update_cached_scheduler_output(
             self, virtual_engine: int,
             output: List[Optional[SamplerOutput]]) -> None:
-        if (self.parallel_config.pipeline_parallel_size > 1 and len(output) > 0
+        if ((self.parallel_config.pipeline_parallel_size > 1 or self.speculative_config.cpu_draft_worker) and len(output) > 0
                 and output[0] is not None):
             last_output = output[-1]
             assert last_output is not None
@@ -1363,7 +1370,7 @@ class LLMEngine:
         cached_last_output = self.cached_scheduler_outputs[
             virtual_engine].last_output
         if (self.scheduler_config.is_multi_step
-                and self.parallel_config.pipeline_parallel_size > 1
+                and (self.parallel_config.pipeline_parallel_size > 1 or self.speculative_config.cpu_draft_worker)
                 and cached_last_output is not None
                 and cached_last_output.sampled_token_ids_cpu is not None):
             return cached_last_output.sampled_token_ids_cpu
