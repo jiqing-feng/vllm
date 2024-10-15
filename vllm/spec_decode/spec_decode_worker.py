@@ -606,22 +606,11 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                     total_in_toks, total_out_toks = self.update_pbar(request_outputs_2, total_in_toks, total_out_toks, outputs, pbar)
                     output = self._run_no_spec(execute_model_req, skip_proposer=run_spec, pool=pool)
                     request_outputs = self.post_process(llm_engine, output, ctx, scheduler_outputs, seq_group_metadata_list, allow_async_output_proc)
-            else:
-                # Nothing scheduled => If there is pending async postprocessor,
-                # then finish it here.
-                if len(ctx.output_queue) > 0:
-                    llm_engine._process_model_outputs(ctx=ctx)
-                # No outputs in this case
-                outputs = []
-                request_outputs = self.post_process(llm_engine, output, ctx, scheduler_outputs, seq_group_metadata_list, allow_async_output_proc)
 
             if execute_model_req and run_spec == "run_spec":
                 # Pass last hidden states from target model to proposer
                 execute_model_req.previous_hidden_states = self.previous_hidden_states
                 self.previous_hidden_states = None
-
-            # Generate proposals using draft worker.
-            if execute_model_req and run_spec == "run_spec":
                 # pre = time.time()
                 with Timer() as proposal_timer_1:
                     proposals_1 = self.proposer_worker.get_spec_proposals(execute_model_req, self._seq_with_bonus_token_in_last_step)
@@ -660,14 +649,6 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                     total_in_toks, total_out_toks = self.update_pbar(request_outputs_2, total_in_toks, total_out_toks, outputs, pbar)
                     output_2 = self._run_no_spec(execute_model_req_2, skip_proposer=run_spec_2, pool=pool)
                     request_outputs_2 = self.post_process(llm_engine, output_2, ctx_2, scheduler_outputs_2, seq_group_metadata_list_2, allow_async_output_proc_2)
-            else:
-                # Nothing scheduled => If there is pending async postprocessor,
-                # then finish it here.
-                if len(ctx.output_queue) > 0:
-                    llm_engine._process_model_outputs(ctx=ctx)
-                # No outputs in this case
-                output_2 = []
-                request_outputs_2 = self.post_process(llm_engine, output_2, ctx_2, scheduler_outputs_2, seq_group_metadata_list_2, allow_async_output_proc_2)
 
             if execute_model_req_2 and run_spec_2 == "run_spec":
                 # Pass last hidden states from target model to proposer
@@ -706,9 +687,6 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                     stage_times=stage_times,)
 
                 request_outputs = self.post_process(llm_engine, output, ctx, scheduler_outputs, seq_group_metadata_list, allow_async_output_proc)
-            else:
-                if len(ctx.output_queue) > 0:
-                    llm_engine._process_model_outputs(ctx=ctx)
 
             total_in_toks, total_out_toks = self.update_pbar(request_outputs, total_in_toks, total_out_toks, outputs, pbar)
             if execute_model_req_2 and run_spec_2 == "run_spec":
