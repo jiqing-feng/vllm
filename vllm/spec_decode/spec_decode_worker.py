@@ -652,7 +652,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                 request_outputs_2 = self.post_process(llm_engine, output_2, ctx_2, scheduler_outputs_2, seq_group_metadata_list_2, allow_async_output_proc_2)
 
             total_in_toks, total_out_toks = self.update_pbar(request_outputs_2, total_in_toks, total_out_toks, outputs, pbar)
-            ctx_2, execute_model_req_2, scheduler_outputs_2, seq_group_metadata_list_2, allow_async_output_proc_2 = self.get_seq(llm_engine, 0)
+            ctx_2, execute_model_req_2, scheduler_outputs_2, seq_group_metadata_list_2, allow_async_output_proc_2 = self.get_seq(llm_engine, 1)
             if execute_model_req_2:
                 run_spec_2 = self.get_if_run_no_spec(execute_model_req_2)
                 if run_spec_2 != "run_spec":

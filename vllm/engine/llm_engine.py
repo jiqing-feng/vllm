@@ -375,17 +375,27 @@ class LLMEngine:
         self.cached_scheduler_outputs = [
             SchedulerOutputState()
             for _ in range(self.parallel_config.pipeline_parallel_size)
+        ] if not getattr(speculative_config, "cpu_draft_worker", None) else [
+            SchedulerOutputState()
+            for _ in range(2)
         ]
 
         self.scheduler_contexts = [
             SchedulerContext()
             for _ in range(self.parallel_config.pipeline_parallel_size)
+        ] if not getattr(speculative_config, "cpu_draft_worker", None) else [
+            SchedulerContext()
+            for _ in range(2)
         ]
 
         self.async_callbacks = [
             functools.partial(self._process_model_outputs,
                               ctx=self.scheduler_contexts[v_id])
             for v_id in range(self.parallel_config.pipeline_parallel_size)
+        ] if not getattr(speculative_config, "cpu_draft_worker", None) else [
+            functools.partial(self._process_model_outputs,
+                              ctx=self.scheduler_contexts[v_id])
+            for v_id in range(2)
         ]
 
         # Currently used by AsyncLLMEngine to ensure quick append
