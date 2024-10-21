@@ -368,7 +368,7 @@ class MultiStepWorker(Worker, ProposerWorkerBase):
 
 
 # Copied from MultiStepWorker
-class CPUMultiStepWorker(CPUWorker):
+class CPUMultiStepWorker:
     """The MultiStepWorker is equivalent to a Worker except that it allows
     multiple forward passes in a single call, assuming the scheduler has
     allocated enough space to store the additional KV. This reduces overhead

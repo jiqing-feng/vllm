@@ -86,7 +86,8 @@ def create_spec_worker(*args, **kwargs) -> "SpecDecodeWorker":
         typical_acceptance_sampler_posterior_alpha,
         disable_logprobs=speculative_config.disable_logprobs,
         disable_log_stats=speculative_config.disable_log_stats,
-        cpu_draft_worker=speculative_config.cpu_draft_worker)
+        cpu_draft_worker=speculative_config.cpu_draft_worker,
+        backend_device=speculative_config.backend_device)
 
     return spec_decode_worker
 
@@ -129,6 +130,7 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
         disable_logprobs: bool,
         disable_log_stats: bool,
         cpu_draft_worker: Optional[bool],
+        backend_device: Optional[str],
     ) -> "SpecDecodeWorker":
 
         allow_zero_draft_token_step = True
@@ -150,24 +152,37 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                 proposer_worker = MLPSpeculatorWorker(**draft_worker_kwargs)
             elif cpu_draft_worker:
                 cpu_draft_worker_kwargs = copy.deepcopy(draft_worker_kwargs)
-                from vllm.executor.cpu_executor import (
-                    _verify_and_get_cache_config, _verify_and_get_model_config,
-                    _verify_and_get_scheduler_config)
+                base_class = None
+                if backend_device == "openvino":
+                    from vllm.executor.openvino_executor import (
+                        _verify_and_get_cache_config, _verify_and_get_model_config)
+                    from vllm.worker.openvino_worker import OpenVINOWorker
+                    cpu_draft_worker_kwargs["device_config"].device_type = "openvino"
+                    import openvino as ov
+                    cpu_draft_worker_kwargs["kv_cache_dtype"] = ov.Type.u8
+                    cpu_draft_worker_kwargs["cache_config"].cache_dtype = ov.Type.u8
+                    base_class = OpenVINOWorker
+                else:
+                    from vllm.executor.cpu_executor import (
+                        _verify_and_get_cache_config, _verify_and_get_model_config,
+                        _verify_and_get_scheduler_config)
+                    cpu_draft_worker_kwargs["device_config"].device_type = "cpu"
+                    from vllm.worker.cpu_worker import CPUWorker
+                    cpu_draft_worker_kwargs["scheduler_config"] = _verify_and_get_scheduler_config(
+                            cpu_draft_worker_kwargs["scheduler_config"])
+                    base_class = CPUWorker
                 cpu_draft_worker_kwargs[
                     "cache_config"] = _verify_and_get_cache_config(
                         cpu_draft_worker_kwargs["cache_config"])
                 cpu_draft_worker_kwargs[
                     "model_config"] = _verify_and_get_model_config(
                         cpu_draft_worker_kwargs["model_config"])
-                cpu_draft_worker_kwargs[
-                    "scheduler_config"] = _verify_and_get_scheduler_config(
-                        cpu_draft_worker_kwargs["scheduler_config"])
-
                 cpu_draft_worker_kwargs["device_config"].device = torch.device(
                     "cpu")
                 cpu_draft_worker_kwargs["device_config"].device_type = "cpu"
                 cpu_draft_worker_kwargs.pop("observability_config")
-                proposer_worker = CPUMultiStepWorker(**cpu_draft_worker_kwargs)
+                cls = type('DynamicClass', (CPUMultiStepWorker, base_class), {})
+                proposer_worker = cls(**cpu_draft_worker_kwargs)
             elif draft_worker_kwargs[
                     "model_config"].hf_config.model_type == "medusa":
                 proposer_worker = MedusaWorker(**draft_worker_kwargs)

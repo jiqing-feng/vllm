@@ -187,7 +187,7 @@ def which_attn_to_use(
 
         return _Backend.TORCH_SDPA
 
-    if is_openvino():
+    if is_openvino() or device == "openvino":
         if selected_backend != _Backend.OPENVINO:
             logger.info("Cannot use %s backend on OpenVINO.", selected_backend)
         return _Backend.OPENVINO
