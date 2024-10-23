@@ -965,7 +965,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
             self.model_config.dtype,
             self.kv_cache_dtype,
             self.block_size,
-            self.device.type,
+            "cuda",
         ) if num_attn_heads else None
         if self.attn_backend:
             self.attn_state = self.attn_backend.get_state_cls()(
@@ -1216,6 +1216,8 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
                 batch_size=batch_size,
                 dtype=self.model_config.dtype,
                 device=self.device)
+        # print("************type : ",type(model_input))
+        # model_input=model_input.to(self.device)
         self.execute_model(model_input, kv_caches, intermediate_tensors)
         torch.cuda.synchronize()
         return
@@ -1544,9 +1546,15 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
             model_forward_end = torch.cuda.Event(enable_timing=True)
             model_forward_start.record()
 
+        model_executable = model_executable.to(self.device)
+        input_tokens = model_input.input_tokens.to(self.device)
+        input_positions = model_input.input_positions.to(self.device)
+
         hidden_or_intermediate_states = model_executable(
-            input_ids=model_input.input_tokens,
-            positions=model_input.input_positions,
+            # input_ids=model_input.input_tokens,
+            # positions=model_input.input_positions,
+            input_ids=input_tokens,
+            positions=input_positions,
             kv_caches=kv_caches,
             attn_metadata=model_input.attn_metadata,
             intermediate_tensors=intermediate_tensors,

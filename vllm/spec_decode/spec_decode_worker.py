@@ -179,7 +179,6 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                         cpu_draft_worker_kwargs["model_config"])
                 cpu_draft_worker_kwargs["device_config"].device = torch.device(
                     "cpu")
-                cpu_draft_worker_kwargs["device_config"].device_type = "cpu"
                 cpu_draft_worker_kwargs.pop("observability_config")
                 cls = type('DynamicClass', (CPUMultiStepWorker, base_class), {})
                 proposer_worker = cls(**cpu_draft_worker_kwargs)

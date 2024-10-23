@@ -14,6 +14,7 @@ from vllm.spec_decode.proposer_worker_base import ProposerWorkerBase
 from vllm.spec_decode.top1_proposer import Top1Proposer
 from vllm.worker.cpu_worker import CPUWorker
 from vllm.worker.worker import Worker
+from vllm.worker.openvino_worker import OpenVINOWorker
 
 
 class MultiStepWorker(Worker, ProposerWorkerBase):
