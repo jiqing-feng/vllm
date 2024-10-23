@@ -1122,6 +1122,7 @@ class SpeculativeConfig:
         typical_acceptance_sampler_posterior_alpha: Optional[float],
         disable_logprobs: Optional[bool],
         cpu_draft_worker: Optional[bool],
+        backend_device: Optional[str]
     ) -> Optional["SpeculativeConfig"]:
         """Create a SpeculativeConfig if possible, else return None.
 
@@ -1180,6 +1181,7 @@ class SpeculativeConfig:
                 according to the log probability settings in SamplingParams.
                 If not specified, it defaults to True.
             cpu_draft_worker (Optional[bool]): Run draft model on CPU.
+            backend_device (Optional[str]): Select backend on CPU, such as OpenVino, Pytorch
     
         Returns:
             Optional["SpeculativeConfig"]: An instance of SpeculativeConfig if
@@ -1311,6 +1313,7 @@ class SpeculativeConfig:
             disable_logprobs=disable_logprobs,
             disable_log_stats=disable_log_stats,
             cpu_draft_worker=cpu_draft_worker,
+            backend_device=backend_device,
         )
 
     @staticmethod
@@ -1406,6 +1409,7 @@ class SpeculativeConfig:
         disable_logprobs: bool,
         disable_log_stats: bool,
         cpu_draft_worker: Optional[bool],
+        backend_device: Optional[str]
     ):
         """Create a SpeculativeConfig object.
 
@@ -1441,6 +1445,7 @@ class SpeculativeConfig:
             disable_log_stats: Whether to disable periodic printing of stage
                 times in speculative decoding.
             cpu_draft_worker: Run draft model on CPU.
+            backend_device (Optional[str]): Select backend on CPU, such as OpenVino, CPU(default Pytorch)
         """
         self.draft_model_config = draft_model_config
         self.draft_parallel_config = draft_parallel_config
@@ -1457,6 +1462,7 @@ class SpeculativeConfig:
         self.disable_logprobs = disable_logprobs
         self.disable_log_stats = disable_log_stats
         self.cpu_draft_worker = cpu_draft_worker or False
+        self.backend_device = backend_device or 'auto'
 
         self._verify_args()
 

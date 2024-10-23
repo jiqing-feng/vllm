@@ -162,6 +162,7 @@ class EngineArgs:
     cpu_draft_worker: Optional[bool] = None
     disable_async_output_proc: bool = False
     override_neuron_config: Optional[Dict[str, Any]] = None
+    backend_device: Optional[bool] = None
 
     def __post_init__(self):
         if self.tokenizer is None:
@@ -950,6 +951,7 @@ class EngineArgs:
             typical_acceptance_sampler_posterior_alpha,
             disable_logprobs=self.disable_logprobs_during_spec_decoding,
             cpu_draft_worker=self.cpu_draft_worker,
+            backend_device=self.backend_device,
         )
 
         if self.num_scheduler_steps > 1:

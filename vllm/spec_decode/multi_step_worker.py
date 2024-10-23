@@ -14,6 +14,7 @@ from vllm.spec_decode.proposer_worker_base import ProposerWorkerBase
 from vllm.spec_decode.top1_proposer import Top1Proposer
 from vllm.worker.cpu_worker import CPUWorker
 from vllm.worker.worker import Worker
+from vllm.worker.openvino_worker import OpenVINOWorker
 
 
 class MultiStepWorker(Worker, ProposerWorkerBase):
@@ -368,7 +369,7 @@ class MultiStepWorker(Worker, ProposerWorkerBase):
 
 
 # Copied from MultiStepWorker
-class CPUMultiStepWorker(CPUWorker):
+class CPUMultiStepWorker:
     """The MultiStepWorker is equivalent to a Worker except that it allows
     multiple forward passes in a single call, assuming the scheduler has
     allocated enough space to store the additional KV. This reduces overhead
