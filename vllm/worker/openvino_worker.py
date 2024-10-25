@@ -8,7 +8,7 @@ import torch.distributed
 from vllm.attention import get_attn_backend
 from vllm.config import (CacheConfig, DeviceConfig, LoadConfig, LoRAConfig,
                          ModelConfig, MultiModalConfig, ParallelConfig,
-                         SchedulerConfig)
+                         SchedulerConfig, PromptAdapterConfig, SpeculativeConfig)
 from vllm.distributed import (broadcast_tensor_dict,
                               ensure_model_parallel_initialized,
                               init_distributed_environment)
@@ -37,6 +37,7 @@ class OpenVINOCacheEngine:
         parallel_config: ParallelConfig,
         device_config: DeviceConfig,
     ) -> None:
+        print("######device_config.device_type: ", device_config.device_type)
         assert device_config.device_type == "openvino"
         self.cache_config = cache_config
         self.model_config = model_config
@@ -69,6 +70,7 @@ class OpenVINOCacheEngine:
             self.model_config.dtype,
             self.cache_config.cache_dtype,
             self.block_size,
+            "openvino",
         )
 
         # Initialize the cache.
@@ -152,6 +154,8 @@ class OpenVINOWorker(LoraNotSupportedWorkerBase):
         multimodal_config: Optional[MultiModalConfig] = None,
         kv_cache_dtype: Optional[ov.Type] = ov.Type.undefined,
         is_driver_worker: bool = False,
+        prompt_adapter_config: Optional[PromptAdapterConfig] = None,
+        speculative_config: Optional[SpeculativeConfig] = None,
     ) -> None:
         self.model_config = model_config
         self.parallel_config = parallel_config
@@ -166,6 +170,7 @@ class OpenVINOWorker(LoraNotSupportedWorkerBase):
         self.lora_config = lora_config
         self.multimodal_config = multimodal_config
         self.is_driver_worker = is_driver_worker
+        self.speculative_config = speculative_config
         if self.is_driver_worker:
             assert self.rank == 0, "The driver worker must have rank 0."
 
@@ -192,12 +197,21 @@ class OpenVINOWorker(LoraNotSupportedWorkerBase):
         self.kv_cache: List[Tuple[ov.Tensor, ov.Tensor]]
 
     def init_device(self) -> None:
-        self.init_distributed_environment()
+        self.device = torch.device("cpu")
+        # self.init_distributed_environment()
         # Set random seed.
         set_random_seed(self.model_config.seed)
 
     def load_model(self):
         self.model_runner.load_model()
+
+    @property
+    def vocab_size(self) -> int:
+        return self.model_runner.vocab_size
+
+    @property
+    def max_model_len(self) -> int:
+        return self.model_config.max_model_len
 
     def determine_num_available_blocks(self) -> Tuple[int, int]:
         """Determine the number of blocks available for the KV cache.

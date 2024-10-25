@@ -965,7 +965,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
             self.model_config.dtype,
             self.kv_cache_dtype,
             self.block_size,
-            self.device.type,
+            "cuda",
         ) if num_attn_heads else None
         if self.attn_backend:
             self.attn_state = self.attn_backend.get_state_cls()(
@@ -1544,6 +1544,10 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
             model_forward_end = torch.cuda.Event(enable_timing=True)
             model_forward_start.record()
 
+        model_executable = model_executable.to(self.device)
+        input_tokens = model_input.input_tokens.to(self.device)
+        input_positions = model_input.input_positions.to(self.device)
+        
         hidden_or_intermediate_states = model_executable(
             input_ids=model_input.input_tokens,
             positions=model_input.input_positions,
