@@ -1,6 +1,7 @@
 import argparse
 import dataclasses
 import json
+import os
 from dataclasses import dataclass
 from typing import (TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Tuple,
                     Type, Union)
@@ -160,6 +161,7 @@ class EngineArgs:
     otlp_traces_endpoint: Optional[str] = None
     collect_detailed_traces: Optional[str] = None
     disable_async_output_proc: bool = False
+    cpu_draft_worker: Optional[bool] = False
     override_neuron_config: Optional[Dict[str, Any]] = None
 
     def __post_init__(self):
@@ -693,6 +695,13 @@ class EngineArgs:
             'calculation in proposal sampling, target sampling, and after '
             'accepted tokens are determined.')
 
+        parser.add_argument('--cpu-draft-worker',
+                            action=StoreBoolean,
+                            default=EngineArgs.cpu_draft_worker,
+                            nargs="?",
+                            const="False",
+                            help='Use CPU to run draft model.')
+
         parser.add_argument('--model-loader-extra-config',
                             type=nullable_str,
                             default=EngineArgs.model_loader_extra_config,
@@ -919,6 +928,14 @@ class EngineArgs:
                 "Enabled BlockSpaceManagerV2 because it is "
                 "required for multi-step (--num-scheduler-steps > 1)")
 
+        # Use dynamic forward patch if draft worker is on CPU
+        if self.cpu_draft_worker:
+            import intel_extension_for_pytorch as ipex
+            assert hasattr(ipex.llm, "modules")
+            os.environ['VLLM_DYNAMIC_FORWARD'] = "1"
+        else:
+            os.environ['VLLM_DYNAMIC_FORWARD'] = "0"
+
         speculative_config = SpeculativeConfig.maybe_create_spec_config(
             target_model_config=model_config,
             target_parallel_config=parallel_config,
@@ -944,6 +961,7 @@ class EngineArgs:
             typical_acceptance_sampler_posterior_alpha=self.
             typical_acceptance_sampler_posterior_alpha,
             disable_logprobs=self.disable_logprobs_during_spec_decoding,
+            cpu_draft_worker=self.cpu_draft_worker,
         )
 
         if self.num_scheduler_steps > 1:
