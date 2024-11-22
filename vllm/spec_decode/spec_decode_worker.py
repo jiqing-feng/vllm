@@ -668,17 +668,8 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
             seq_group_metadata_list, proposal_lens_list)
         original_indices = spec_indices + non_spec_indices
 
-        # Get probabilities of target model, including bonus tokens.
-        proposal_verifier_probs = proposal_scores.probs[spec_indices]
-
         # Get non-speculative sampled tokens from target model.
         non_spec_token_ids = proposal_scores.token_ids[non_spec_indices]
-
-        # Get bonus tokens from target model.
-        bonus_token_ids = proposal_scores.token_ids[spec_indices, -1:]
-
-        # Get probabilities according to proposal method.
-        proposal_probs = proposals.proposal_probs[spec_indices]
 
         # Get proposed tokens.
         proposal_token_ids = proposals.proposal_token_ids[spec_indices]
@@ -693,13 +684,12 @@ class SpecDecodeWorker(LoraNotSupportedWorkerBase):
                 if sgm.sampling_params.seed is not None
             }
 
-        accepted_token_ids = self.spec_decode_sampler(
-            target_with_bonus_probs=proposal_verifier_probs,
-            bonus_token_ids=bonus_token_ids,
-            draft_probs=proposal_probs,
-            draft_token_ids=proposal_token_ids,
-            **sampler_extra_kwargs,
-        )
+        matched_num = ((~(proposal_token_ids == proposal_scores.token_ids.to(
+            proposal_token_ids.device)[:, :-1])).cumsum(dim=-1) < 1).sum(-1)
+        accepted_token_ids = proposal_scores.token_ids.clone()
+        for i in range(accepted_token_ids.shape[0]):
+            accepted_token_ids[i][matched_num[i] + 1:] = -1
+
         # Append output tokens from non-speculative sequences to
         # the accepted token ids tensor.
         non_spec_token_ids = non_spec_token_ids.expand(-1, max_proposal_len +
